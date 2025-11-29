@@ -142,7 +142,7 @@ export const Button = forwardRef<View, ButtonProps>(
             ...baseStyle,
             backgroundColor: 'transparent',
             borderWidth: 1,
-            borderColor,
+            borderColor: '#FFFFFF', // Borda sempre branca na variante outline
           };
         case 'secondary':
           return { ...baseStyle, backgroundColor: secondaryColor };
@@ -172,7 +172,7 @@ export const Button = forwardRef<View, ButtonProps>(
         case 'success':
           return { ...baseTextStyle, color: destructiveForegroundColor };
         case 'outline':
-          return { ...baseTextStyle, color: primaryColor };
+          return { ...baseTextStyle, color: '#FFFFFF' }; // Texto sempre branco na variante outline
         case 'secondary':
           return { ...baseTextStyle, color: secondaryForegroundColor };
         case 'ghost':
@@ -195,7 +195,7 @@ export const Button = forwardRef<View, ButtonProps>(
         case 'success':
           return destructiveForegroundColor;
         case 'outline':
-          return primaryColor;
+          return '#FFFFFF'; // Cor sempre branca na variante outline
         case 'secondary':
           return secondaryForegroundColor;
         case 'ghost':
