@@ -88,15 +88,15 @@ export function RadarChart({
         {/* Grid circles */}
         {[0.2, 0.4, 0.6, 0.8, 1.0].map((scale, idx) => (
           <G key={`grid-${idx}`}>
-            <Circle
-              cx={centerX}
-              cy={centerY}
-              r={radius * scale}
-              fill="none"
-              stroke={mutedColor}
-              strokeWidth={1}
-              opacity={0.2}
-            />
+          <Circle
+            cx={centerX}
+            cy={centerY}
+            r={radius * scale}
+            fill="none"
+            stroke={mutedColor}
+            strokeWidth={1}
+            opacity={0.2}
+          />
           </G>
         ))}
 
@@ -108,15 +108,15 @@ export function RadarChart({
           if (!isFinite(x) || !isFinite(y)) return null;
           return (
             <G key={`line-${index}`}>
-              <Line
-                x1={centerX}
-                y1={centerY}
-                x2={x}
-                y2={y}
-                stroke={mutedColor}
-                strokeWidth={1}
-                opacity={0.2}
-              />
+            <Line
+              x1={centerX}
+              y1={centerY}
+              x2={x}
+              y2={y}
+              stroke={mutedColor}
+              strokeWidth={1}
+              opacity={0.2}
+            />
             </G>
           );
         })}
@@ -141,8 +141,8 @@ export function RadarChart({
               r={4}
               fill={primaryColor}
               stroke="#FFFFFF"
-              strokeWidth={2}
-            />
+            strokeWidth={2}
+          />
           </G>
         ))}
 
@@ -156,17 +156,17 @@ export function RadarChart({
             if (!isFinite(x) || !isFinite(y)) return null;
             return (
               <G key={`label-${index}`}>
-                <SvgText
-                  x={x}
-                  y={y}
+              <SvgText
+                x={x}
+                y={y}
                   fontSize={14}
-                  fill={mutedColor}
-                  textAnchor="middle"
-                  alignmentBaseline="middle"
+                fill={mutedColor}
+                textAnchor="middle"
+                alignmentBaseline="middle"
                   fontWeight="600"
-                >
-                  {point.label || ''}
-                </SvgText>
+              >
+                {point.label || ''}
+              </SvgText>
               </G>
             );
           })}
