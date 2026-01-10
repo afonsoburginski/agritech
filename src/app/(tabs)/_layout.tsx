@@ -1,30 +1,36 @@
+import * as React from 'react';
 import { Tabs } from 'expo-router';
-import React from 'react';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Colors } from '@/theme/colors';
-import { Home, ClipboardList, Bug, Camera, User } from 'lucide-react-native';
+import { Colors, palette } from '@/theme/colors';
+import { Home, ClipboardList, Bug, Camera } from 'lucide-react-native';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
+
+  // Cores que funcionam bem em ambos os temas
+  const activeColor = palette.gold; // Dourado - cor principal da marca
+  const inactiveColor = isDark ? '#6B6B6B' : '#8B8B8B';
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
+        tabBarActiveTintColor: activeColor,
+        tabBarInactiveTintColor: inactiveColor,
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: colors.card,
-          borderTopColor: colors.border,
+          backgroundColor: isDark ? '#0A0A0A' : '#FFFDF8',  // Branco quente no light
+          borderTopColor: isDark ? '#1F1F1F' : '#E0DCD3',   // Borda bege
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          height: 70,
+          paddingTop: 4,
+          paddingBottom: 26,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
+          fontSize: 11,
+          fontWeight: '600',
+          marginTop: 2,
         },
       }}>
       <Tabs.Screen
@@ -37,29 +43,29 @@ export default function TabLayout() {
       <Tabs.Screen
         name="atividades"
         options={{
-          title: 'Atividades',
+          title: 'Tarefas',
           tabBarIcon: ({ color, size }) => <ClipboardList size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="monitoramento"
         options={{
-          title: 'Monitoramento',
+          title: 'Pragas',
           tabBarIcon: ({ color, size }) => <Bug size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="reconhecimento"
         options={{
-          title: 'Reconhecimento',
+          title: 'Scanner',
           tabBarIcon: ({ color, size }) => <Camera size={size} color={color} />,
         }}
       />
+      {/* Perfil oculto da tab bar, acessível via avatar no header */}
       <Tabs.Screen
         name="perfil"
         options={{
-          title: 'Perfil',
-          tabBarIcon: ({ color, size }) => <User size={size} color={color} />,
+          href: null, // Oculta da tab bar
         }}
       />
     </Tabs>

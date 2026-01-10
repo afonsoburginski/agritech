@@ -340,13 +340,17 @@ export const Button = forwardRef<View, ButtonProps>(
       if (!style) return style;
 
       const styleArray = Array.isArray(style) ? style : [style];
-      return styleArray.map((s) => {
+      const processedStyles = styleArray.map((s) => {
         if (s && typeof s === 'object' && 'flex' in s) {
           const { flex, ...restStyle } = s;
           return restStyle;
         }
         return s;
       });
+      
+      // Se for array com um único elemento, retornar o elemento diretamente
+      // Caso contrário, retornar o array para ser espalhado
+      return processedStyles.length === 1 ? processedStyles[0] : processedStyles;
     };
 
     const buttonStyle = getButtonStyle();
@@ -354,6 +358,11 @@ export const Button = forwardRef<View, ButtonProps>(
     const contentColor = getColor();
     const iconSize = getIconSize();
     const styleWithoutFlex = getStyleWithoutFlex();
+
+    // Extrair cor do textStyle se existir para forçar no componente Text
+    const textColorFromStyle = textStyle && typeof textStyle === 'object' && 'color' in textStyle 
+      ? (textStyle as TextStyle).color as string 
+      : undefined;
 
     return animation && Animated ? (
       <Pressable
@@ -365,7 +374,7 @@ export const Button = forwardRef<View, ButtonProps>(
         style={getPressableStyle()}
         {...props}
       >
-        <Animated.View style={[animatedStyle, buttonStyle, styleWithoutFlex]}>
+        <Animated.View style={[animatedStyle, buttonStyle, ...(Array.isArray(styleWithoutFlex) ? styleWithoutFlex : [styleWithoutFlex])]}>
           {loading ? (
             <ButtonSpinner
               size={size}
@@ -379,7 +388,13 @@ export const Button = forwardRef<View, ButtonProps>(
               {icon && (
                 <Icon name={icon} color={contentColor} size={iconSize} />
               )}
-              <Text style={[finalTextStyle, textStyle]}>{children}</Text>
+              <Text 
+                lightColor={textColorFromStyle}
+                darkColor={textColorFromStyle}
+                style={[finalTextStyle, textStyle]}
+              >
+                {children}
+              </Text>
             </View>
           ) : (
             <View
@@ -396,7 +411,7 @@ export const Button = forwardRef<View, ButtonProps>(
     ) : (
       <TouchableOpacity
         ref={ref}
-        style={[buttonStyle, disabled && { opacity: 0.5 }, styleWithoutFlex]}
+        style={[buttonStyle, disabled && { opacity: 0.5 }, ...(Array.isArray(styleWithoutFlex) ? styleWithoutFlex : [styleWithoutFlex])]}
         onPress={handleTouchablePress}
         disabled={disabled || loading}
         activeOpacity={0.8}

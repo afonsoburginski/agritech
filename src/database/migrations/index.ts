@@ -1,5 +1,6 @@
 import { logger } from '@/services/logger';
 import { SCHEMA_VERSION, createSchemaSQL } from '../schema';
+import { seedData } from './002_seed_data';
 
 /**
  * Executa todas as migrations pendentes
@@ -22,6 +23,8 @@ export async function runMigrations(db: any): Promise<void> {
 
     logger.info('Verificando migrations', { currentVersion, targetVersion: SCHEMA_VERSION });
 
+    let schemaCreated = false;
+
     // Executar migrations pendentes
     if (currentVersion < SCHEMA_VERSION) {
       await db.withTransactionAsync(async () => {
@@ -36,6 +39,8 @@ export async function runMigrations(db: any): Promise<void> {
               'INSERT INTO "schema-migrations" (version, "applied-at") VALUES (?, ?)',
               [1, new Date().toISOString()]
             );
+            
+            schemaCreated = true;
           }
 
           // Aqui podem ser adicionadas migrations futuras
@@ -53,6 +58,15 @@ export async function runMigrations(db: any): Promise<void> {
       });
     } else {
       logger.info('Nenhuma migration pendente');
+    }
+
+    // Sempre verificar e garantir que dados de exemplo existem
+    // (tanto na primeira criação quanto se o banco já existir sem dados)
+    try {
+      await seedData(db, false); // false = não força, apenas insere se não existir
+    } catch (error) {
+      logger.error('Erro ao inserir dados de exemplo', { error });
+      // Não falhar a migration se o seed falhar
     }
   } catch (error) {
     logger.error('Erro ao executar migrations', { error });

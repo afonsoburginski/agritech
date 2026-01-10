@@ -26,23 +26,23 @@ const themeColors = {
     accent: palette.gold,              // Dourado - cor de destaque
     tertiary: palette.brown,           // Marrom - cor terciária
     
-    // Cores de interface
-    background: '#F8F8F8',            // Fundo claro
-    surface: '#FFFFFF',               // Superfície (cards, etc)
-    text: '#0e270a',                  // Texto principal (dark green)
+    // Cores de interface - Tom creme/bege harmonioso
+    background: '#F7F5F0',            // Creme suave (warm off-white)
+    surface: '#FFFDF8',               // Branco quente (cards, etc)
+    text: '#1A1A1A',                  // Texto principal (quase preto suave)
     textSecondary: '#595412',         // Texto secundário (olive green)
-    textLight: '#757575',             // Texto claro
-    border: '#E0E0E0',                // Bordas
+    textLight: '#6B6B6B',             // Texto claro
+    border: '#E0DCD3',                // Bordas bege
     
     // Cores semânticas
-    success: '#0e270a',               // Sucesso (dark green)
-    error: '#D32F2F',                 // Erro (vermelho padrão)
+    success: '#2D8A4E',               // Verde sucesso
+    error: '#D94452',                 // Erro (vermelho suave)
     warning: palette.brown,            // Aviso (brown)
     info: palette.oliveGreen,         // Informação (olive green)
     
     // Cores especiais
     highlight: palette.gold,          // Destaque (gold)
-    shadow: 'rgba(14, 39, 10, 0.1)',  // Sombra com dark green
+    shadow: 'rgba(14, 39, 10, 0.08)', // Sombra sutil
   },
   dark: {
     // Cores principais da paleta (ajustadas para dark mode)

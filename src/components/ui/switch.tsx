@@ -1,5 +1,5 @@
+import * as React from 'react';
 import { useColor } from '@/hooks/useColor';
-import React from 'react';
 
 import { Text } from '@/components/ui/text';
 import { View } from '@/components/ui/view';
@@ -16,9 +16,9 @@ interface SwitchProps extends RNSwitchProps {
 }
 
 export function Switch({ label, error, labelStyle, ...props }: SwitchProps) {
-  const mutedColor = useColor('muted');
-  const primary = useColor('primary');
-  const danger = useColor('red');
+  const mutedColor = useColor({}, 'muted');
+  const primary = useColor({}, 'primary');
+  const danger = useColor({}, 'red');
 
   return (
     <View style={{ marginBottom: 8 }}>
@@ -50,8 +50,9 @@ export function Switch({ label, error, labelStyle, ...props }: SwitchProps) {
         )}
 
         <RNSwitch
-          trackColor={{ false: mutedColor, true: '#7DD87D' }}
-          thumbColor={props.value ? '#ffffff' : '#f4f3f4'}
+          trackColor={{ false: mutedColor, true: '#C9A227' }}
+          thumbColor={props.value ? '#FFFDF8' : '#f4f3f4'}
+          ios_backgroundColor={mutedColor}
           {...props}
         />
       </View>

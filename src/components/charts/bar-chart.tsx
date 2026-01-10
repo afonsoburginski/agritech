@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, ViewStyle, Dimensions } from 'react-native';
+import { View, ViewStyle, Dimensions, Text } from 'react-native';
 import Svg, { Rect, Text as SvgText, G } from 'react-native-svg';
 import { useColor } from '@/hooks/useColor';
 import Constants from 'expo-constants';
@@ -70,15 +70,27 @@ export function BarChart({
 
   // Validação de dados
   if (!data || data.length === 0) {
-    return null;
+    return (
+      <View style={[{ width: chartWidth, height }, style]}>
+        <Text style={{ color: mutedColor, textAlign: 'center', padding: 20 }}>
+          Nenhum dado disponível
+        </Text>
+      </View>
+    );
   }
 
   const validData = data.filter((d) => d && typeof d.value === 'number' && !isNaN(d.value) && isFinite(d.value));
   if (validData.length === 0) {
-    return null;
+    return (
+      <View style={[{ width: chartWidth, height }, style]}>
+        <Text style={{ color: mutedColor, textAlign: 'center', padding: 20 }}>
+          Nenhum dado válido
+        </Text>
+      </View>
+    );
   }
 
-  const maxValue = Math.max(...validData.map((d) => d.value), 1);
+  const maxValue = Math.max(...validData.map((d) => d.value), 0) || 1;
   const barWidth = innerWidth / validData.length - 10;
   const barSpacing = 10;
   

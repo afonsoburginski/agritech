@@ -1,209 +1,400 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, View as RNView } from 'react-native';
+import { useState, useEffect, useMemo } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { Image } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { BottomSheet, useBottomSheet } from '@/components/ui/bottom-sheet-simple';
+import { useAtividades } from '@/hooks/use-atividades';
+import { useSupabaseActivities } from '@/hooks/use-supabase-data';
 import { useColor } from '@/hooks/useColor';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
+import { useAvatarUri, useAppStore } from '@/stores/app-store';
 import { 
   ClipboardList, 
   Search, 
   Plus,
-  Filter,
   Calendar,
-  Clock,
   CheckCircle2,
-  AlertCircle,
-  Edit,
-  Trash2
+  MoreVertical,
+  MapPin
 } from 'lucide-react-native';
 
+type TabType = 'todas' | 'pendentes' | 'concluidas';
+
 export default function AtividadesScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const avatarUri = useAvatarUri();
   const backgroundColor = useColor({}, 'background');
+  const cardColor = useColor({}, 'card');
   const textColor = useColor({}, 'text');
   const mutedColor = useColor({}, 'textMuted');
   const borderColor = useColor({}, 'border');
   const primaryColor = useColor({}, 'primary');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pendente' | 'concluida'>('all');
+  const [activeTab, setActiveTab] = useState<TabType>('todas');
+  
+  // Hooks
+  const { isOnline } = useAppStore();
+  const { atividades: localAtividades, create, refresh } = useAtividades();
+  const { activities: supabaseActivities, isLoading, refresh: refreshSupabase } = useSupabaseActivities();
+  const { isVisible, open, close } = useBottomSheet();
+  
+  // Usar dados do Supabase se online, senão usar dados locais
+  const atividades = useMemo(() => {
+    if (isOnline && supabaseActivities.length > 0) {
+      return supabaseActivities.map(a => ({
+        id: a.id,
+        nome: a.name,
+        descricao: a.description,
+        tipo: a.type,
+        status: a.status,
+        talhaoNome: a.plotName,
+        dataInicio: a.createdAt,
+        createdAt: a.createdAt,
+        updatedAt: a.createdAt,
+        synced: true,
+      }));
+    }
+    return localAtividades;
+  }, [isOnline, supabaseActivities, localAtividades]);
+  
+  // Abrir sheet automaticamente se vier da home screen
+  useEffect(() => {
+    if (params.openForm === 'true') {
+      open();
+      // Limpar o parâmetro da URL
+      router.setParams({ openForm: undefined });
+    }
+  }, [params.openForm, open, router]);
+  
+  // Form state
+  const [formNome, setFormNome] = useState('');
+  const [formDescricao, setFormDescricao] = useState('');
+  const [formTipo, setFormTipo] = useState('outros');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Mock data - será substituído quando store estiver implementado
-  const atividades: any[] = [
-    { id: '1', nome: 'Colheita de Soja', status: 'pendente', descricao: 'Talhão 1, Safra 2023/2024', dataInicio: '2024-03-10', dataFim: null },
-    { id: '2', nome: 'Adubação NPK', status: 'concluida', descricao: 'Talhão 2', dataInicio: '2024-03-05', dataFim: '2024-03-06' },
-    { id: '3', nome: 'Pulverização Herbicida', status: 'pendente', descricao: 'Talhão 3', dataInicio: '2024-03-12', dataFim: null },
-  ];
+  // Handlers
+  const handleNova = () => {
+    setFormNome('');
+    setFormDescricao('');
+    setFormTipo('outros');
+    open();
+  };
+
+  const handleSubmit = async () => {
+    if (!formNome.trim()) {
+      Alert.alert('Erro', 'Nome da atividade é obrigatório');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await create({
+        nome: formNome.trim(),
+        descricao: formDescricao.trim() || undefined,
+        tipo: formTipo,
+      });
+      close();
+      setFormNome('');
+      setFormDescricao('');
+      refresh();
+      Alert.alert('Sucesso', 'Atividade criada com sucesso!');
+    } catch (error: any) {
+      Alert.alert('Erro', error.message || 'Erro ao criar atividade');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const filteredAtividades = atividades.filter((atividade) => {
     const matchesSearch = atividade.nome.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          atividade.descricao?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || atividade.status === filterStatus;
+    const matchesFilter = activeTab === 'todas' || 
+                         (activeTab === 'pendentes' && atividade.status === 'pendente') ||
+                         (activeTab === 'concluidas' && atividade.status === 'concluida');
     return matchesSearch && matchesFilter;
   });
+
+  const tabs: { key: TabType; label: string; count: number }[] = [
+    { key: 'todas', label: 'Todas', count: atividades.length },
+    { key: 'pendentes', label: 'Pendentes', count: atividades.filter(a => a.status === 'pendente').length },
+    { key: 'concluidas', label: 'Concluídas', count: atividades.filter(a => a.status === 'concluida').length },
+  ];
+
+  const tipos = [
+    { value: 'monitoramento', label: 'Monitoramento' },
+    { value: 'scout', label: 'Scout de Campo' },
+    { value: 'amostragem', label: 'Amostragem' },
+    { value: 'identificacao', label: 'Identificação de Praga' },
+    { value: 'controle', label: 'Controle de Praga' },
+    { value: 'avaliacao', label: 'Avaliação de Danos' },
+    { value: 'relatorio', label: 'Relatório' },
+    { value: 'outros', label: 'Outros' },
+  ];
+
+  const handlePerfil = () => {
+    router.push('/(tabs)/perfil');
+  };
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text variant="heading" style={{ color: textColor }}>
-          Atividades
-        </Text>
-        <Button
-          variant="default"
-          size="sm"
-          onPress={() => {
-            // TODO: Navegar para tela de criar atividade
-          }}
-        >
-          <Icon name={Plus} size={16} color={useColor({}, 'primaryForeground')} />
-          <Text style={{ color: useColor({}, 'primaryForeground'), marginLeft: 6 }}>
-            Nova
+        <View style={styles.headerLeft}>
+          <Text style={[styles.headerTitle, { color: textColor }]}>Tarefas</Text>
+          <Text style={[styles.headerSubtitle, { color: mutedColor }]}>
+            {atividades.length} atividades registradas
           </Text>
-        </Button>
+        </View>
+        <TouchableOpacity 
+          onPress={handlePerfil}
+          activeOpacity={0.7}
+          style={styles.avatarContainer}
+        >
+          <Image
+            source={avatarUri ? { uri: avatarUri } : require('../../../assets/images/avatar.jpg')}
+            style={styles.avatar}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
       </View>
 
-      {/* Busca e Filtros */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Icon name={Search} size={20} color={mutedColor} />
-          <Input
-            variant="default"
-            placeholder="Buscar atividades..."
+      {/* Search */}
+      <View style={styles.searchSection}>
+        <View style={[styles.searchContainer, { backgroundColor: cardColor, borderColor }]}>
+          <Icon name={Search} size={18} color={mutedColor} />
+          <TextInput
+            style={[styles.searchInput, { color: textColor }]}
+            placeholder="Buscar tarefas..."
+            placeholderTextColor={mutedColor}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            inputStyle={styles.searchInput}
-            containerStyle={{ flex: 1, marginLeft: 8 }}
           />
-        </View>
-        <View style={styles.filterContainer}>
-          <Button
-            variant={filterStatus === 'all' ? 'default' : 'outline'}
-            size="sm"
-            onPress={() => setFilterStatus('all')}
-            style={styles.filterButton}
-          >
-            <Text style={{ fontSize: 12 }}>Todas</Text>
-          </Button>
-          <Button
-            variant={filterStatus === 'pendente' ? 'default' : 'outline'}
-            size="sm"
-            onPress={() => setFilterStatus('pendente')}
-            style={styles.filterButton}
-          >
-            <Text style={{ fontSize: 12 }}>Pendentes</Text>
-          </Button>
-          <Button
-            variant={filterStatus === 'concluida' ? 'default' : 'outline'}
-            size="sm"
-            onPress={() => setFilterStatus('concluida')}
-            style={styles.filterButton}
-          >
-            <Text style={{ fontSize: 12 }}>Concluídas</Text>
-          </Button>
         </View>
       </View>
 
-      {/* Lista de Atividades */}
+      {/* Tabs */}
+      <View style={styles.tabsContainer}>
+        <View style={[styles.tabsRow, { borderBottomColor: borderColor }]}>
+          <View style={styles.tabsList}>
+            {tabs.map((tab) => (
+              <TouchableOpacity
+                key={tab.key}
+                style={styles.tab}
+                onPress={() => setActiveTab(tab.key)}
+                activeOpacity={0.7}
+              >
+                <Text 
+                  style={[
+                    styles.tabLabel, 
+                    { color: activeTab === tab.key ? primaryColor : mutedColor }
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+                <Text 
+                  style={[
+                    styles.tabCount, 
+                    { 
+                      color: activeTab === tab.key ? primaryColor : mutedColor,
+                      opacity: activeTab === tab.key ? 1 : 0.6
+                    }
+                  ]}
+                >
+                  {tab.count}
+                </Text>
+                {activeTab === tab.key && (
+                  <View style={[styles.tabIndicator, { backgroundColor: primaryColor }]} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity 
+            style={[styles.addButton, { borderColor: primaryColor }]}
+            activeOpacity={0.7}
+            onPress={handleNova}
+          >
+            <Icon name={Plus} size={16} color={primaryColor} />
+            <Text style={[styles.addButtonText, { color: primaryColor }]}>Nova</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Lista */}
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {filteredAtividades.length === 0 ? (
-          <Card style={styles.emptyCard}>
-            <Icon name={ClipboardList} size={48} color={mutedColor} />
-            <Text variant="body" style={{ color: mutedColor, marginTop: 16, textAlign: 'center' }}>
-              {searchQuery || filterStatus !== 'all' 
-                ? 'Nenhuma atividade encontrada' 
-                : 'Nenhuma atividade registrada'}
+          <View style={styles.emptyState}>
+            <View style={[styles.emptyIcon, { backgroundColor: cardColor }]}>
+              <Icon name={ClipboardList} size={32} color={mutedColor} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: textColor }]}>
+              Nenhuma tarefa encontrada
             </Text>
-            {!searchQuery && filterStatus === 'all' && (
-              <Button
-                variant="default"
-                style={{ marginTop: 16 }}
-                onPress={() => {
-                  // TODO: Navegar para tela de criar atividade
-                }}
-              >
-                <Icon name={Plus} size={16} color={useColor({}, 'primaryForeground')} />
-                <Text style={{ color: useColor({}, 'primaryForeground'), marginLeft: 6 }}>
-                  Criar primeira atividade
-                </Text>
-              </Button>
-            )}
-          </Card>
+            <Text style={[styles.emptySubtitle, { color: mutedColor }]}>
+              {searchQuery ? 'Tente buscar por outro termo' : 'Crie sua primeira tarefa'}
+            </Text>
+          </View>
         ) : (
           filteredAtividades.map((atividade) => (
-            <Card key={atividade.id} style={styles.activityCard}>
-              <View style={styles.activityHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text variant="title" style={{ color: textColor }}>
+            <TouchableOpacity 
+              key={atividade.id} 
+              style={[styles.taskCard, { backgroundColor: cardColor }]}
+              activeOpacity={0.7}
+            >
+              <View style={styles.taskLeft}>
+                <TouchableOpacity style={styles.checkButton}>
+                  {atividade.status === 'concluida' ? (
+                    <Icon name={CheckCircle2} size={22} color={palette.gold} />
+                  ) : (
+                    <View style={[styles.emptyCheck, { borderColor: mutedColor }]} />
+                  )}
+                </TouchableOpacity>
+                <View style={styles.taskInfo}>
+                  <Text 
+                    style={[
+                      styles.taskName, 
+                      { 
+                        color: textColor,
+                        textDecorationLine: atividade.status === 'concluida' ? 'line-through' : 'none',
+                        opacity: atividade.status === 'concluida' ? 0.6 : 1
+                      }
+                    ]}
+                  >
                     {atividade.nome}
                   </Text>
-                  {atividade.descricao && (
-                    <Text variant="caption" style={{ color: mutedColor, marginTop: 4 }}>
-                      {atividade.descricao}
-                    </Text>
-                  )}
-                </View>
-                <Badge variant={atividade.status === 'concluida' ? 'success' : 'outline'}>
-                  {atividade.status === 'concluida' ? 'Concluída' : 'Pendente'}
-                </Badge>
-              </View>
-
-              <View style={styles.activityInfo}>
-                <View style={styles.activityInfoItem}>
-                  <Icon name={Calendar} size={14} color={mutedColor} />
-                  <Text variant="caption" style={{ color: mutedColor, marginLeft: 4 }}>
-                    Início: {atividade.dataInicio ? new Date(atividade.dataInicio).toLocaleDateString('pt-BR') : 'Não definida'}
+                  <Text style={[styles.taskDescription, { color: mutedColor }]}>
+                    {atividade.descricao}
                   </Text>
-                </View>
-                {atividade.dataFim && (
-                  <View style={styles.activityInfoItem}>
-                    <Icon name={CheckCircle2} size={14} color={mutedColor} />
-                    <Text variant="caption" style={{ color: mutedColor, marginLeft: 4 }}>
-                      Fim: {new Date(atividade.dataFim).toLocaleDateString('pt-BR')}
+                  <View style={styles.taskMeta}>
+                    <Icon name={Calendar} size={12} color={mutedColor} />
+                    <Text style={[styles.taskDate, { color: mutedColor }]}>
+                      {atividade.dataInicio ? new Date(atividade.dataInicio).toLocaleDateString('pt-BR') : 'Sem data'}
                     </Text>
                   </View>
-                )}
+                </View>
               </View>
-
-              <View style={styles.activityActions}>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onPress={() => {
-                    // TODO: Navegar para tela de editar atividade
-                  }}
-                >
-                  <Icon name={Edit} size={14} color={textColor} />
-                  <Text style={{ color: textColor, marginLeft: 4, fontSize: 12 }}>
-                    Editar
-                  </Text>
-                </Button>
-                {atividade.status === 'pendente' && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onPress={() => {
-                      // TODO: Excluir atividade (apenas se estiver em cache local)
-                    }}
-                  >
-                    <Icon name={Trash2} size={14} color={palette.brown} />
-                    <Text style={{ color: palette.brown, marginLeft: 4, fontSize: 12 }}>
-                      Excluir
-                    </Text>
-                  </Button>
-                )}
-              </View>
-            </Card>
+              <TouchableOpacity style={styles.moreButton}>
+                <Icon name={MoreVertical} size={18} color={mutedColor} />
+              </TouchableOpacity>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
+
+      {/* Modal de Nova Atividade */}
+      <BottomSheet
+        isVisible={isVisible}
+        onClose={close}
+        title="Nova Tarefa"
+      >
+        <View style={styles.formContainer}>
+          <View style={styles.formField}>
+            <View style={styles.labelContainer}>
+              <Icon name={ClipboardList} size={16} color={mutedColor} />
+              <Text style={[styles.label, { color: textColor }]}>Nome da Tarefa *</Text>
+            </View>
+            <Input
+              placeholder="Ex: Monitoramento Talhão A"
+              value={formNome}
+              onChangeText={setFormNome}
+              containerStyle={styles.input}
+              autoFocus
+            />
+          </View>
+
+          <View style={styles.formField}>
+            <View style={styles.labelContainer}>
+              <Icon name={Calendar} size={16} color={mutedColor} />
+              <Text style={[styles.label, { color: textColor }]}>Descrição</Text>
+            </View>
+            <Input
+              placeholder="Ex: Verificar presença de lagartas e percevejos"
+              value={formDescricao}
+              onChangeText={setFormDescricao}
+              containerStyle={{ ...styles.input, ...styles.textArea }}
+              multiline
+              numberOfLines={3}
+            />
+          </View>
+
+          <View style={styles.formField}>
+            <View style={styles.labelContainer}>
+              <Icon name={CheckCircle2} size={16} color={mutedColor} />
+              <Text style={[styles.label, { color: textColor }]}>Tipo de Atividade</Text>
+            </View>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false} 
+              style={styles.tipoContainer}
+              contentContainerStyle={styles.tipoContent}
+            >
+              {tipos.map((tipo) => (
+                <TouchableOpacity
+                  key={tipo.value}
+                  style={[
+                    styles.tipoButton,
+                    {
+                      backgroundColor: formTipo === tipo.value ? palette.gold : cardColor,
+                      borderColor: formTipo === tipo.value ? palette.gold : borderColor,
+                    },
+                  ]}
+                  onPress={() => setFormTipo(tipo.value)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.tipoButtonText,
+                      { 
+                        color: formTipo === tipo.value 
+                          ? '#000000' 
+                          : textColor,
+                        fontWeight: formTipo === tipo.value ? '600' : '400',
+                      },
+                    ]}
+                  >
+                    {tipo.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          <View style={styles.formActions}>
+            <Button
+              variant="outline"
+              onPress={close}
+              style={[styles.cancelButton, { flex: 1 }]}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="default"
+              onPress={handleSubmit}
+              style={[
+                styles.submitButton, 
+                { 
+                  flex: 1,
+                  backgroundColor: palette.gold,
+                }
+              ]}
+              disabled={isSubmitting || !formNome.trim()}
+            >
+              <Text style={{ color: '#000000', fontWeight: '600' }}>
+                {isSubmitting ? 'Salvando...' : 'Criar Tarefa'}
+              </Text>
+            </Button>
+          </View>
+        </View>
+      </BottomSheet>
     </View>
   );
 }
@@ -216,63 +407,222 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
-  searchContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 16,
+  headerLeft: {
+    flex: 1,
   },
-  searchInputContainer: {
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  addButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 4,
+  },
+  addButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  avatarContainer: {
+    position: 'relative',
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  searchSection: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
   },
   searchInput: {
     flex: 1,
+    fontSize: 15,
   },
-  filterContainer: {
+  tabsContainer: {
+    paddingHorizontal: 16,
+  },
+  tabsRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
   },
-  filterButton: {
-    flex: 1,
+  tabsList: {
+    flexDirection: 'row',
+  },
+  tab: {
+    paddingVertical: 12,
+    marginRight: 16,
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  tabLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  tabCount: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: -1,
+    left: 0,
+    right: 0,
+    height: 2,
+    borderRadius: 1,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 24,
   },
-  emptyCard: {
+  emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 48,
-    minHeight: 300,
+    paddingVertical: 60,
   },
-  activityCard: {
-    marginBottom: 12,
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
   },
-  activityHeader: {
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+  },
+  taskCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  taskLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
     gap: 12,
   },
-  activityInfo: {
-    marginBottom: 12,
-    gap: 6,
+  checkButton: {
+    paddingTop: 2,
   },
-  activityInfoItem: {
+  emptyCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+  },
+  taskInfo: {
+    flex: 1,
+  },
+  taskName: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  taskDescription: {
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  taskMeta: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
-  activityActions: {
+  taskDate: {
+    fontSize: 12,
+  },
+  moreButton: {
+    padding: 4,
+  },
+  formContainer: {
+    gap: 24,
+    paddingTop: 8,
+  },
+  formField: {
+    gap: 10,
+  },
+  labelContainer: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
+    alignItems: 'center',
+    gap: 6,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  input: {
+    marginTop: 0,
+  },
+  textArea: {
+    minHeight: 80,
+    paddingTop: 12,
+  },
+  tipoContainer: {
+    marginTop: 4,
+  },
+  tipoContent: {
+    paddingRight: 16,
+  },
+  tipoButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    marginRight: 10,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  tipoButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  formActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+    paddingTop: 8,
+  },
+  cancelButton: {
+    flex: 1,
+  },
+  submitButton: {
+    flex: 1,
   },
 });

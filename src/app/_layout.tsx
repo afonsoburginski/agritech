@@ -5,9 +5,13 @@ import { useEffect } from 'react';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuthStore, useAuthIsAuthenticated, useAuthIsLoading } from '@/stores/auth-store';
+import { useAppStore } from '@/stores/app-store';
+import type { AppState } from '@/stores/app-store';
 import { initializeDatabase } from '@/database/db';
 import { logger } from '@/services/logger';
 import { ThemeProvider } from '@/theme/theme-provider';
+import { networkService } from '@/services/network-service';
+import { syncService } from '@/services/sync-service';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -20,28 +24,43 @@ export default function RootLayout() {
   const isAuthenticated = useAuthIsAuthenticated();
   const isLoading = useAuthIsLoading();
   const checkAuth = useAuthStore((state) => state.checkAuth);
+  const loadAvatar = useAppStore((state: AppState) => state.loadAvatar);
 
-  // Inicializar database e verificar autenticação ao iniciar
+  // Inicializar database, serviços de rede/sync e verificar autenticação ao iniciar
   useEffect(() => {
     const init = async () => {
       try {
+        // 1. Inicializar database SQLite
         await initializeDatabase();
+        
+        // 2. Carregar avatar salvo
+        await loadAvatar();
+        
+        // 3. Iniciar monitoramento de rede
+        networkService.start();
+        
+        // 4. Iniciar serviço de sincronização
+        syncService.start();
+        
+        logger.info('App inicializado com sucesso');
       } catch (error) {
-        logger.error('Erro ao inicializar database', { error }, error as Error);
+        logger.error('Erro ao inicializar app', { error }, error as Error);
       }
       checkAuth();
     };
+    
     init();
-  }, [checkAuth]);
+    
+    // Cleanup ao desmontar
+    return () => {
+      networkService.stop();
+      syncService.stop();
+    };
+  }, [checkAuth, loadAvatar]);
 
   // Gerenciar navegação baseada em autenticação
   useEffect(() => {
     if (isLoading) {
-      return;
-    }
-
-    // Ignorar se segments ainda está vazio (router não inicializou)
-    if (segments.length === 0) {
       return;
     }
 

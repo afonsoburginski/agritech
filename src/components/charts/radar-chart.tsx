@@ -1,29 +1,7 @@
-import React, { useEffect } from 'react';
 import { View, ViewStyle, Dimensions } from 'react-native';
 import Svg, { Circle, Line, Polygon, Text as SvgText, G } from 'react-native-svg';
 import { useColor } from '@/hooks/useColor';
-import Constants from 'expo-constants';
-
-const isExpoGo = Constants.executionEnvironment === 'storeClient';
-
-let Animated: any = View;
-let useSharedValue: any = null;
-let useAnimatedStyle: any = null;
-let withTiming: any = null;
-
-if (!isExpoGo) {
-  try {
-    const reanimated = require('react-native-reanimated');
-    if (reanimated && reanimated.default) {
-      Animated = reanimated.default;
-      useSharedValue = reanimated.useSharedValue;
-      useAnimatedStyle = reanimated.useAnimatedStyle;
-      withTiming = reanimated.withTiming;
-    }
-  } catch (error: any) {
-    // Fallback
-  }
-}
+import { Text } from '@/components/ui/text';
 
 export interface RadarChartDataPoint {
   label: string;
@@ -54,29 +32,34 @@ export function RadarChart({
     width: configWidth,
     height = 200,
     showLabels = true,
-    animated = true,
-    duration = 1000,
     maxValue: configMaxValue,
   } = config;
 
-  // Usar tons de azul do claro ao médio
-  const primaryColor = '#60A5FA'; // Azul médio
-  const mutedColor = useColor({}, 'mutedForeground');
+  // Hooks devem ser chamados incondicionalmente
+  const primaryColor = '#60A5FA';
+  const mutedColor = useColor({}, 'textMuted');
   const { width: screenWidth } = Dimensions.get('window');
+  
+  // Validação de dados (após todos os hooks)
+  const validData = (data || []).filter(
+    (d) => d && typeof d.value === 'number' && !isNaN(d.value) && isFinite(d.value)
+  );
+  
+  // Se não há dados válidos, mostrar mensagem
+  if (validData.length === 0) {
+    return (
+      <View style={[{ width: configWidth || 200, height, alignItems: 'center', justifyContent: 'center' }, style]}>
+        <Text variant="caption" style={{ color: mutedColor }}>
+          Sem dados disponíveis
+        </Text>
+      </View>
+    );
+  }
+
   const chartWidth = configWidth || Math.min(screenWidth - 48, height);
   const centerX = chartWidth / 2;
   const centerY = height / 2;
-  const radius = Math.min(centerX, centerY) - 40;
-
-  // Validação de dados
-  if (!data || data.length === 0) {
-    return null;
-  }
-
-  const validData = data.filter((d) => d && typeof d.value === 'number' && !isNaN(d.value) && isFinite(d.value));
-  if (validData.length === 0) {
-    return null;
-  }
+  const radius = Math.min(centerX, centerY) - 60;
 
   const maxValue = configMaxValue || Math.max(...validData.map((d) => d.value), 100);
   const numPoints = validData.length;
@@ -98,40 +81,23 @@ export function RadarChart({
   };
 
   const points = validData.map((point, index) => getPoint(index, point.value));
-  const pathData = points
-    .filter((p) => isFinite(p.x) && isFinite(p.y))
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(' ') + ' Z';
-
-  const animatedOpacity = isExpoGo || !useSharedValue 
-    ? { value: 1 } 
-    : { value: useSharedValue(0) };
-
-  useEffect(() => {
-    if (animated && !isExpoGo && withTiming && animatedOpacity.value) {
-      animatedOpacity.value = withTiming(1, { duration });
-    }
-  }, []);
-
-  const opacity = typeof animatedOpacity.value === 'number' 
-    ? animatedOpacity.value 
-    : animatedOpacity.value?.value || 1;
 
   return (
     <View style={[{ width: chartWidth, height }, style]}>
       <Svg width={chartWidth} height={height}>
         {/* Grid circles */}
-        {[0.2, 0.4, 0.6, 0.8, 1.0].map((scale) => (
-          <Circle
-            key={scale}
-            cx={centerX}
-            cy={centerY}
-            r={radius * scale}
-            fill="none"
-            stroke={mutedColor}
-            strokeWidth={1}
-            opacity={0.2}
-          />
+        {[0.2, 0.4, 0.6, 0.8, 1.0].map((scale, idx) => (
+          <G key={`grid-${idx}`}>
+            <Circle
+              cx={centerX}
+              cy={centerY}
+              r={radius * scale}
+              fill="none"
+              stroke={mutedColor}
+              strokeWidth={1}
+              opacity={0.2}
+            />
+          </G>
         ))}
 
         {/* Grid lines */}
@@ -141,16 +107,17 @@ export function RadarChart({
           const y = centerY + radius * Math.sin(angle);
           if (!isFinite(x) || !isFinite(y)) return null;
           return (
-            <Line
-              key={index}
-              x1={centerX}
-              y1={centerY}
-              x2={x}
-              y2={y}
-              stroke={mutedColor}
-              strokeWidth={1}
-              opacity={0.2}
-            />
+            <G key={`line-${index}`}>
+              <Line
+                x1={centerX}
+                y1={centerY}
+                x2={x}
+                y2={y}
+                stroke={mutedColor}
+                strokeWidth={1}
+                opacity={0.2}
+              />
+            </G>
           );
         })}
 
@@ -159,36 +126,51 @@ export function RadarChart({
           <Polygon
             points={points.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')}
             fill={primaryColor}
-            fillOpacity={0.3 * opacity}
+            fillOpacity={0.4}
             stroke={primaryColor}
-            strokeWidth={2}
+            strokeWidth={3}
           />
         )}
+        
+        {/* Data points markers */}
+        {points.map((point, index) => (
+          <G key={`point-${index}`}>
+            <Circle
+              cx={point.x}
+              cy={point.y}
+              r={4}
+              fill={primaryColor}
+              stroke="#FFFFFF"
+              strokeWidth={2}
+            />
+          </G>
+        ))}
 
         {/* Labels */}
         {showLabels &&
           validData.map((point, index) => {
             const angle = index * angleStep - Math.PI / 2;
-            const labelRadius = radius + 20;
+            const labelRadius = radius + 35;
             const x = centerX + labelRadius * Math.cos(angle);
             const y = centerY + labelRadius * Math.sin(angle);
             if (!isFinite(x) || !isFinite(y)) return null;
             return (
-              <SvgText
-                key={index}
-                x={x}
-                y={y}
-                fontSize={11}
-                fill={mutedColor}
-                textAnchor="middle"
-                alignmentBaseline="middle"
-              >
-                {point.label || ''}
-              </SvgText>
+              <G key={`label-${index}`}>
+                <SvgText
+                  x={x}
+                  y={y}
+                  fontSize={14}
+                  fill={mutedColor}
+                  textAnchor="middle"
+                  alignmentBaseline="middle"
+                  fontWeight="600"
+                >
+                  {point.label || ''}
+                </SvgText>
+              </G>
             );
           })}
       </Svg>
     </View>
   );
 }
-

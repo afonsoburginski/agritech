@@ -2,10 +2,10 @@ import { Text } from '@/components/ui/text';
 import { View } from '@/components/ui/view';
 import { useColor } from '@/hooks/useColor';
 import { BORDER_RADIUS } from '@/theme/globals';
-import { TextStyle, ViewStyle } from 'react-native';
+import { TextStyle, ViewStyle, ViewProps } from 'react-native';
 
-interface CardProps {
-  children: React.ReactNode;
+interface CardProps extends ViewProps {
+  children?: React.ReactNode;
   style?: ViewStyle;
 }
 
@@ -21,10 +21,10 @@ export function Card({ children, style }: CardProps) {
           backgroundColor: cardColor,
           borderRadius: BORDER_RADIUS,
           padding: 18,
-          shadowColor: foregroundColor,
+          shadowColor: '#0e270a',
           shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.05,
-          shadowRadius: 3,
+          shadowOpacity: 0.06,
+          shadowRadius: 4,
           elevation: 2,
         },
         style,

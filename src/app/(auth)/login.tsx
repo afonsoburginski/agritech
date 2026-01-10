@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import * as React from 'react';
+import { useState } from 'react';
 import {
   StyleSheet,
   KeyboardAvoidingView,
@@ -7,7 +8,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Image } from 'expo-image';
+import { Image } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuthStore } from '@/stores/auth-store';
 import { Button } from '@/components/ui/button';
@@ -90,10 +91,8 @@ export default function LoginScreen() {
     }
   };
 
-  // Usar logo para light mode e logo-2 para dark mode
-  const logoSource = colorScheme === 'dark' 
-    ? require('../../../assets/images/logo-2.png')
-    : require('../../../assets/images/logo.png');
+  // Usar sempre logo.png
+  const logoSource = require('../../../assets/images/logo.png');
 
   return (
     <KeyboardAvoidingView
@@ -107,12 +106,11 @@ export default function LoginScreen() {
             <Image
               source={logoSource}
               style={styles.logo}
-              contentFit="contain"
-              transition={200}
+              resizeMode="contain"
             />
             <Text variant="body" style={{ color: textColor, marginTop: 16, fontWeight: '600' }}>
               <Text style={{ color: palette.gold, fontWeight: '600' }}>FOX</Text>
-              <Text style={{ color: textColor, fontWeight: '600' }}>AGRITECH</Text>
+              <Text style={{ color: textColor, fontWeight: '600' }}>FIELDCORE</Text>
             </Text>
           </View>
 
@@ -146,7 +144,8 @@ export default function LoginScreen() {
               disabled={loading}
               loading={loading}
               variant="secondary"
-              style={[styles.loginButton, { borderRadius: 10 }]}
+              style={[styles.loginButton, { borderRadius: 10, backgroundColor: '#FFFFFF' }]}
+              textStyle={{ color: '#1F2937' }}
             >
               Entrar
             </Button>

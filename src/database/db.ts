@@ -6,11 +6,12 @@ let dbInstance: any = null;
 let isDatabaseAvailable = false;
 let SQLite: any = null;
 
-// Verificar se estamos no Expo Go (não suporta módulos nativos)
-const isExpoGo = Constants.executionEnvironment === 'storeClient';
-
 /**
- * Carrega o módulo SQLite dinamicamente (necessário para Expo Go)
+ * Carrega o módulo SQLite dinamicamente
+ * Conforme documentação: https://docs.expo.dev/versions/latest/sdk/sqlite/
+ * 
+ * IMPORTANTE: No Expo Go, módulos nativos não funcionam.
+ * Para usar expo-sqlite, é necessário um development build ou build de produção.
  */
 async function loadSQLite(): Promise<boolean> {
   // Se já carregou, retornar
@@ -18,33 +19,31 @@ async function loadSQLite(): Promise<boolean> {
     return true;
   }
   
-  // Se estiver no Expo Go, não tentar carregar (não suporta módulos nativos)
+  // Verificar se está no Expo Go - não tentar carregar módulos nativos
+  const isExpoGo = Constants.executionEnvironment === 'storeClient';
   if (isExpoGo) {
+    // Expo Go não suporta módulos nativos - usar fallback em memória
     return false;
   }
   
   try {
-    // Usar require dinâmico com verificação de disponibilidade
+    // Usar import dinâmico - só será executado em runtime em development builds
+    // O Metro pode tentar analisar, mas em development builds funcionará
     const sqliteModule = await import('expo-sqlite');
+    
     if (sqliteModule && typeof sqliteModule.openDatabaseAsync === 'function') {
       SQLite = sqliteModule;
       return true;
     }
     return false;
   } catch (error: any) {
-    // Silenciar erro no Expo Go - é esperado que não funcione
-    if (error?.message?.includes('Cannot find native module') || 
-        error?.message?.includes('ExpoSQLiteNext')) {
-      // Expo Go não suporta módulos nativos - isso é normal
-      return false;
-    }
-    // Módulo expo-sqlite não disponível - silenciar warning
+    // Silenciar erros - pode ser que o módulo não esteja disponível
     return false;
   }
 }
 
 /**
- * Verifica se o SQLite está disponível (não funciona no Expo Go)
+ * Verifica se o SQLite está disponível
  */
 async function isSQLiteAvailable(): Promise<boolean> {
   return await loadSQLite();
@@ -54,10 +53,12 @@ async function isSQLiteAvailable(): Promise<boolean> {
  * Obtém instância única do banco de dados SQLite
  * Implementa singleton pattern para garantir uma única conexão
  * Retorna null se SQLite não estiver disponível (Expo Go)
+ * 
+ * Conforme documentação: https://docs.expo.dev/versions/latest/sdk/sqlite/
  */
 export async function getDatabase(): Promise<any> {
   if (!(await isSQLiteAvailable())) {
-    // SQLite não disponível no Expo Go - silenciar warning
+    logger.warn('SQLite não disponível, usando dados em memória');
     return null;
   }
 
@@ -66,6 +67,7 @@ export async function getDatabase(): Promise<any> {
   }
 
   try {
+    // Usar openDatabaseAsync conforme documentação oficial
     dbInstance = await SQLite.openDatabaseAsync('agritech.db');
 
     // Executar migrations na primeira abertura
@@ -103,11 +105,12 @@ export async function closeDatabase(): Promise<void> {
 export async function initializeDatabase(): Promise<void> {
   try {
     await getDatabase();
-    // Database inicializado silenciosamente
+    // Database e seeds inicializados via runMigrations
   } catch (error: any) {
     // Ignorar erros de módulo nativo não encontrado (Expo Go)
     if (error?.message?.includes('Cannot find native module') || 
-        error?.message?.includes('ExpoSQLiteNext')) {
+        error?.message?.includes('ExpoSQLiteNext') ||
+        error?.message?.includes('SQLiteSession')) {
       // Silenciar - é esperado no Expo Go
       return;
     }
@@ -122,4 +125,3 @@ export async function initializeDatabase(): Promise<void> {
 export function isDatabaseReady(): boolean {
   return isDatabaseAvailable && dbInstance !== null;
 }
-

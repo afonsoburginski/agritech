@@ -13,11 +13,11 @@ const tintColorDark = palette.gold;       // Gold - cor de destaque no dark mode
 // Cores do tema Expo (usando paleta Agritech)
 export const Colors = {
   light: {
-    text: palette.darkGreen,
-    background: '#F8F8F8',
+    text: '#1A1A1A',                  // Texto suave
+    background: '#F7F5F0',            // Creme suave
     tint: tintColorLight,
     icon: palette.oliveGreen,
-    tabIconDefault: '#757575',
+    tabIconDefault: '#8B8B8B',
     tabIconSelected: tintColorLight,
   },
   dark: {

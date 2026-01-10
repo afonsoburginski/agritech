@@ -2,12 +2,13 @@ import { Text } from '@/components/ui/text';
 import { View } from '@/components/ui/view';
 import { useColor } from '@/hooks/useColor';
 import { BORDER_RADIUS, CORNERS, FONT_SIZE, HEIGHT } from '@/theme/globals';
-import React, {
+import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useState,
+  ReactNode,
 } from 'react';
 import {
   Dimensions,
@@ -73,7 +74,7 @@ interface TabsContextType {
 }
 
 interface TabsProps {
-  children: React.ReactNode;
+  children?: ReactNode;
   defaultValue?: string;
   value?: string;
   onValueChange?: (value: string) => void;
@@ -83,12 +84,12 @@ interface TabsProps {
 }
 
 interface TabsListProps {
-  children: React.ReactNode;
+  children?: ReactNode;
   style?: ViewStyle;
 }
 
 interface TabsTriggerProps {
-  children: React.ReactNode;
+  children?: ReactNode;
   value: string;
   disabled?: boolean;
   style?: ViewStyle;
@@ -96,7 +97,7 @@ interface TabsTriggerProps {
 }
 
 interface TabsContentProps {
-  children: React.ReactNode;
+  children?: ReactNode;
   value: string;
   style?: ViewStyle;
 }
@@ -211,13 +212,13 @@ export function Tabs({
 
 // Add this after the existing interfaces
 interface CarouselTabContentProps {
-  children: React.ReactNode;
+  children: ReactNode;
   value: string;
   style?: ViewStyle;
 }
 
 // Add a ref to track all content components
-let allTabContents: { [key: string]: React.ReactNode } = {};
+let allTabContents: { [key: string]: ReactNode } = {};
 
 function CarouselTabContent({
   children,

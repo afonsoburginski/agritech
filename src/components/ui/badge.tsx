@@ -12,7 +12,7 @@ type BadgeVariant =
   | 'success';
 
 interface BadgeProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   variant?: BadgeVariant;
   style?: ViewStyle;
   textStyle?: TextStyle;

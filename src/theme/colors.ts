@@ -6,62 +6,62 @@
  */
 
 const lightColors = {
-  // Base colors
-  background: '#FFFFFF',
-  foreground: '#000000',
+  // Base colors - Tom creme/bege suave inspirado na paleta Agritech
+  background: '#F7F5F0',        // Creme suave (warm off-white)
+  foreground: '#1A1A1A',
 
-  // Card colors
-  card: '#F2F2F7',
-  cardForeground: '#000000',
+  // Card colors - Tom mais quente
+  card: '#FFFDF8',              // Branco quente
+  cardForeground: '#1A1A1A',
 
   // Popover colors
-  popover: '#FFFFFF',
-  popoverForeground: '#000000',
+  popover: '#FFFDF8',
+  popoverForeground: '#1A1A1A',
 
-  // Primary colors
-  primary: '#18181b',
+  // Primary colors - Usando verde escuro da paleta
+  primary: '#0e270a',           // Dark Green
   primaryForeground: '#FFFFFF',
 
   // Secondary colors
-  secondary: '#F2F2F7',
-  secondaryForeground: '#18181b',
+  secondary: '#F0EDE5',         // Bege claro
+  secondaryForeground: '#0e270a',
 
   // Muted colors
-  muted: '#78788033',
-  mutedForeground: '#71717a',
+  muted: '#E8E4DB',             // Bege médio
+  mutedForeground: '#6B6B6B',
 
-  // Accent colors
-  accent: '#F2F2F7',
-  accentForeground: '#18181b',
+  // Accent colors - Dourado da paleta
+  accent: '#eab203',            // Gold
+  accentForeground: '#1A1A1A',
 
   // Destructive colors
-  destructive: '#ef4444',
+  destructive: '#DC3545',
   destructiveForeground: '#FFFFFF',
 
-  // Border and input
-  border: '#E0E0E0',
-  input: '#e4e4e7',
-  ring: '#18181b',
+  // Border and input - Bordas mais quentes
+  border: '#E0DCD3',            // Borda bege
+  input: '#F0EDE5',
+  ring: '#0e270a',
 
   // Text colors
-  text: '#000000',
-  textMuted: '#71717a',
+  text: '#1A1A1A',              // Quase preto (mais suave que #000)
+  textMuted: '#6B6B6B',
 
   // Legacy support for existing components
-  tint: '#18181b',
-  icon: '#18181b',
-  tabIconDefault: '#757575',
-  tabIconSelected: '#18181b',
+  tint: '#0e270a',
+  icon: '#595412',              // Olive Green
+  tabIconDefault: '#8B8B8B',
+  tabIconSelected: '#0e270a',
 
-  // System colors - iOS system colors
-  blue: '#007AFF',
-  green: '#34C759',
-  red: '#FF3B30',
-  orange: '#FF9500',
-  yellow: '#FFCC00',
-  pink: '#FF2D92',
-  purple: '#AF52DE',
-  teal: '#5AC8FA',
+  // System colors - Tons mais suaves
+  blue: '#3B7DD8',
+  green: '#2D8A4E',
+  red: '#D94452',
+  orange: '#E08C2D',
+  yellow: '#D4A617',
+  pink: '#D94480',
+  purple: '#9652C4',
+  teal: '#4AADBD',
   indigo: '#5856D6',
 };
 
