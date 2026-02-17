@@ -197,7 +197,6 @@ export function useSupabaseScouts() {
       }));
 
       setScouts(mapped);
-      const withPests = mapped.filter(s => s.totalPragas > 0).length;
     } catch (err: any) {
       logger.error('Erro ao carregar scouts do Supabase', { error: err.message });
       setError(err.message);
