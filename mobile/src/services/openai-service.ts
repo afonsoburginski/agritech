@@ -1,0 +1,197 @@
+/**
+ * OpenAI Service - Reconhecimento de Pragas via Edge Function
+ *
+ * Usa a Edge Function 'identify-pest' do Supabase que:
+ * 1. Chama OpenAI Vision para identificar a praga (com RAG de referências)
+ * 2. Cruza o resultado com a base AGROFIT da Embrapa
+ * 3. Faz upload da imagem no Storage
+ * 4. Retorna resultado enriquecido
+ */
+
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { logger } from './logger';
+import { networkService } from './network-service';
+import { supabase } from './supabase';
+
+
+export interface EmbrapaProduct {
+  nome: string;
+  ingredienteAtivo: string;
+  classeAgronômica: string;
+  classificacaoToxicologica: string;
+  titular: string;
+}
+
+export interface PestRecognitionResult {
+  name: string;
+  popularName?: string;
+  scientificName?: string;
+  confidence: number;
+  severity: 'baixa' | 'media' | 'alta' | 'critica';
+  pestType?: string;
+  recommendation?: string;
+  alternatives?: Array<{ name: string; confidence: number }>;
+  embrapa?: {
+    pragaId: string | null;
+    produtosRecomendados: EmbrapaProduct[];
+    matched: boolean;
+  };
+  image?: {
+    url: string | null;
+    path: string | null;
+  };
+}
+
+/** Max dimension (pixels) for images sent to the API. Larger images are resized. */
+const MAX_IMAGE_DIMENSION = 1280;
+/** JPEG quality (0-1) for compressed images. 0.7 keeps good detail for pest ID. */
+const JPEG_QUALITY = 0.7;
+
+/**
+ * Compresses and resizes an image URI before upload.
+ * Returns a local file URI of the optimized image.
+ */
+async function compressImage(uri: string): Promise<string> {
+  try {
+    const result = await manipulateAsync(
+      uri,
+      [{ resize: { width: MAX_IMAGE_DIMENSION } }],
+      { compress: JPEG_QUALITY, format: SaveFormat.JPEG },
+    );
+    return result.uri;
+  } catch (error) {
+    logger.warn('Compressão de imagem falhou, usando original', { error });
+    return uri;
+  }
+}
+
+/**
+ * Converte URI de imagem para Base64
+ */
+export async function imageUriToBase64(uri: string): Promise<string> {
+  try {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        const base64Data = base64.split(',')[1] || base64;
+        resolve(base64Data);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    logger.error('Erro ao converter imagem para base64', { error });
+    throw error;
+  }
+}
+
+/**
+ * Chama a Edge Function identify-pest para reconhecer praga via IA + Embrapa.
+ * Exportado para uso pela fila de reconhecimento (recognition-queue-service).
+ */
+export async function callIdentifyPestEdgeFunction(
+  imageBase64: string,
+  metadata?: {
+    fazendaId?: number;
+    talhaoId?: number;
+    latitude?: number;
+    longitude?: number;
+    markerId?: number;
+  }
+): Promise<PestRecognitionResult> {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase não configurado (URL ou KEY ausente)');
+  }
+
+  const url = `${supabaseUrl}/functions/v1/identify-pest`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${supabaseAnonKey}`,
+      'apikey': supabaseAnonKey,
+    },
+    body: JSON.stringify({
+      imageBase64,
+      fazendaId: metadata?.fazendaId,
+      talhaoId: metadata?.talhaoId,
+      latitude: metadata?.latitude,
+      longitude: metadata?.longitude,
+      markerId: metadata?.markerId,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('Erro na Edge Function identify-pest', { status: response.status, body: errorText });
+    throw new Error(`Erro na API (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+
+  return {
+    name: data.identification.name,
+    popularName: data.identification.popularName,
+    scientificName: data.identification.scientificName,
+    confidence: data.identification.confidence,
+    severity: data.identification.severity,
+    pestType: data.identification.pestType,
+    recommendation: data.identification.recommendation,
+    alternatives: data.identification.alternatives,
+    embrapa: data.embrapa,
+    image: data.image,
+  };
+}
+
+/**
+ * Reconhece praga usando a Edge Function (OpenAI Vision + Embrapa AGROFIT).
+ * Se offline, enfileira no SQLite para processar quando reconectar.
+ */
+export async function recognizePest(
+  imageUri: string,
+  metadata?: {
+    fazendaId?: number;
+    talhaoId?: number;
+    latitude?: number;
+    longitude?: number;
+    markerId?: number;
+  }
+): Promise<PestRecognitionResult> {
+  logger.info('Iniciando reconhecimento de praga via Edge Function', { imageUri: imageUri.substring(0, 50) });
+
+  const isOnline = await networkService.getStatus();
+
+  if (!isOnline) {
+    logger.warn('Offline - adicionando à fila de reconhecimento (SQLite)');
+    const { addToRecognitionQueue } = await import('@/services/recognition-queue-service');
+    await addToRecognitionQueue(imageUri, {
+      fazendaId: metadata?.fazendaId,
+      talhaoId: metadata?.talhaoId,
+      latitude: metadata?.latitude,
+      longitude: metadata?.longitude,
+      markerId: metadata?.markerId,
+    });
+    throw new Error('Sem conexão. A foto foi salva e será analisada quando você estiver online.');
+  }
+
+  const compressedUri = await compressImage(imageUri);
+  const imageBase64 = await imageUriToBase64(compressedUri);
+
+  const result = await callIdentifyPestEdgeFunction(imageBase64, metadata);
+
+  logger.info('Reconhecimento concluído com sucesso', {
+    name: result.name,
+    confidence: result.confidence,
+    severity: result.severity,
+    embrapaMatch: result.embrapa?.matched ?? false,
+  });
+
+  return result;
+}
