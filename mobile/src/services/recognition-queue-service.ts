@@ -23,7 +23,6 @@ export interface RecognitionQueueMetadata {
   talhaoId?: number;
   latitude?: number;
   longitude?: number;
-  markerId?: number;
 }
 
 /**

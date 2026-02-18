@@ -2,15 +2,14 @@ import * as React from 'react';
 import { Tabs } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, palette } from '@/theme/colors';
-import { Home, LayoutDashboard, ClipboardList, Bug, Camera, FileText } from 'lucide-react-native';
+import { LayoutDashboard, ClipboardList, Bug, Camera, FileText } from 'lucide-react-native';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
 
-  // Cores que funcionam bem em ambos os temas
-  const activeColor = palette.gold; // Dourado - cor principal da marca
+  const activeColor = palette.gold;
   const inactiveColor = isDark ? '#6B6B6B' : '#8B8B8B';
 
   return (
@@ -32,19 +31,20 @@ export default function TabLayout() {
           fontWeight: '600',
           marginTop: 2,
         },
-      }}>
+      }}
+      initialRouteName="index">
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
+          title: 'Início',
+          tabBarIcon: ({ color, size }) => <LayoutDashboard size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="inicio"
         options={{
           title: 'Início',
-          tabBarIcon: ({ color, size }) => <LayoutDashboard size={size} color={color} />,
+          href: null, // Mesmo conteúdo que index; oculto da tab bar
         }}
       />
       <Tabs.Screen
@@ -58,7 +58,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="monitoramento"
         options={{
-          title: 'Pragas',
+          title: 'Monitoramento',
           tabBarIcon: ({ color, size }) => <Bug size={size} color={color} />,
         }}
       />

@@ -14,12 +14,22 @@ import { networkService } from './network-service';
 import { supabase } from './supabase';
 
 
-export interface EmbrapaProduct {
-  nome: string;
-  ingredienteAtivo: string;
-  classeAgronômica: string;
-  classificacaoToxicologica: string;
-  titular: string;
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DetectedPest {
+  name: string;
+  popularName?: string;
+  scientificName?: string;
+  confidence: number;
+  severity: 'baixa' | 'media' | 'alta' | 'critica';
+  pestType?: string;
+  recommendation?: string;
+  boundingBox?: BoundingBox;
 }
 
 export interface PestRecognitionResult {
@@ -31,11 +41,8 @@ export interface PestRecognitionResult {
   pestType?: string;
   recommendation?: string;
   alternatives?: Array<{ name: string; confidence: number }>;
-  embrapa?: {
-    pragaId: string | null;
-    produtosRecomendados: EmbrapaProduct[];
-    matched: boolean;
-  };
+  pests: DetectedPest[];
+  recomendacao?: string;
   image?: {
     url: string | null;
     path: string | null;
@@ -100,7 +107,7 @@ export async function callIdentifyPestEdgeFunction(
     talhaoId?: number;
     latitude?: number;
     longitude?: number;
-    markerId?: number;
+    cultura?: string;
   }
 ): Promise<PestRecognitionResult> {
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -124,7 +131,7 @@ export async function callIdentifyPestEdgeFunction(
       talhaoId: metadata?.talhaoId,
       latitude: metadata?.latitude,
       longitude: metadata?.longitude,
-      markerId: metadata?.markerId,
+      cultura: metadata?.cultura,
     }),
   });
 
@@ -136,16 +143,31 @@ export async function callIdentifyPestEdgeFunction(
 
   const data = await response.json();
 
+  const pestsRaw: any[] = data.pests ?? [];
+  const pests: DetectedPest[] = pestsRaw.map((p: any) => ({
+    name: p.name,
+    popularName: p.popularName ?? undefined,
+    scientificName: p.scientificName ?? undefined,
+    confidence: p.confidence,
+    severity: p.severity,
+    pestType: p.pestType ?? 'PRAGA',
+    recommendation: p.recommendation ?? undefined,
+    boundingBox: p.boundingBox ?? undefined,
+  }));
+
+  const primary = data.identification ?? pests[0];
+
   return {
-    name: data.identification.name,
-    popularName: data.identification.popularName,
-    scientificName: data.identification.scientificName,
-    confidence: data.identification.confidence,
-    severity: data.identification.severity,
-    pestType: data.identification.pestType,
-    recommendation: data.identification.recommendation,
-    alternatives: data.identification.alternatives,
-    embrapa: data.embrapa,
+    name: primary?.name ?? 'Não identificado',
+    popularName: primary?.popularName ?? undefined,
+    scientificName: primary?.scientificName ?? undefined,
+    confidence: primary?.confidence ?? 0,
+    severity: primary?.severity ?? 'baixa',
+    pestType: primary?.pestType ?? 'PRAGA',
+    recommendation: primary?.recommendation ?? undefined,
+    alternatives: data.identification?.alternatives ?? [],
+    pests,
+    recomendacao: data.recomendacao ?? undefined,
     image: data.image,
   };
 }
@@ -161,7 +183,7 @@ export async function recognizePest(
     talhaoId?: number;
     latitude?: number;
     longitude?: number;
-    markerId?: number;
+    cultura?: string;
   }
 ): Promise<PestRecognitionResult> {
   logger.info('Iniciando reconhecimento de praga via Edge Function', { imageUri: imageUri.substring(0, 50) });
@@ -176,7 +198,6 @@ export async function recognizePest(
       talhaoId: metadata?.talhaoId,
       latitude: metadata?.latitude,
       longitude: metadata?.longitude,
-      markerId: metadata?.markerId,
     });
     throw new Error('Sem conexão. A foto foi salva e será analisada quando você estiver online.');
   }
@@ -190,7 +211,7 @@ export async function recognizePest(
     name: result.name,
     confidence: result.confidence,
     severity: result.severity,
-    embrapaMatch: result.embrapa?.matched ?? false,
+    hasRecomendacao: !!result.recomendacao,
   });
 
   return result;

@@ -40,12 +40,23 @@ export interface PragaInput {
   recomendacao?: string;
 }
 
-export interface EmbrapaProductInfo {
-  nome: string;
-  ingredienteAtivo: string;
-  classeAgronômica: string;
-  classificacaoToxicologica: string;
-  titular: string;
+
+export interface ReconhecimentoBoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ReconhecimentoPest {
+  praga: string;
+  nomePopular?: string;
+  nomeCientifico?: string;
+  confianca: number;
+  severidade: Severidade;
+  tipoPraga?: string;
+  recomendacao?: string;
+  boundingBox?: ReconhecimentoBoundingBox;
 }
 
 export interface ReconhecimentoResult {
@@ -57,11 +68,8 @@ export interface ReconhecimentoResult {
   tipoPraga?: string;
   recomendacao?: string;
   alternativas?: Array<{ praga: string; confianca: number }>;
-  embrapa?: {
-    pragaId: string | null;
-    produtosRecomendados: EmbrapaProductInfo[];
-    matched: boolean;
-  };
+  /** All detected pests from the image */
+  pests: ReconhecimentoPest[];
   imagemUrl?: string | null;
 }
 
@@ -240,7 +248,11 @@ export function useReconhecimento() {
   // ========================================
   // RECONHECER IMAGEM VIA OPENAI
   // ========================================
-  const recognize = useCallback(async (uri: string, scoutId?: string): Promise<ReconhecimentoResult> => {
+  const recognize = useCallback(async (
+    uri: string,
+    scoutId?: string,
+    metadata?: { fazendaId?: number; talhaoId?: number; cultura?: string }
+  ): Promise<ReconhecimentoResult> => {
     // Importar dinamicamente para evitar problemas de bundling
     const { recognizePest } = await import('@/services/openai-service');
     
@@ -252,10 +264,20 @@ export function useReconhecimento() {
       setIsOfflinePending(false);
       currentScoutId.current = scoutId || null;
 
-      // Chamar API da OpenAI Vision
-      const apiResult = await recognizePest(uri);
+      // Chamar API da OpenAI Vision (cultura/talhaoId ajudam a Edge a buscar produtos Embrapa)
+      const apiResult = await recognizePest(uri, metadata);
 
-      // Converter para formato interno (inclui dados da Embrapa)
+      const convertedPests: ReconhecimentoPest[] = (apiResult.pests ?? []).map((p: any) => ({
+        praga: p.name,
+        nomePopular: p.popularName,
+        nomeCientifico: p.scientificName,
+        confianca: p.confidence,
+        severidade: (p.severity as Severidade) || 'media',
+        tipoPraga: p.pestType,
+        recomendacao: p.recommendation,
+        boundingBox: p.boundingBox,
+      }));
+
       const convertedResult: ReconhecimentoResult = {
         praga: apiResult.name,
         nomePopular: apiResult.popularName,
@@ -263,9 +285,9 @@ export function useReconhecimento() {
         confianca: apiResult.confidence,
         severidade: apiResult.severity as Severidade,
         tipoPraga: apiResult.pestType,
-        recomendacao: apiResult.recommendation,
+        recomendacao: apiResult.recomendacao ?? apiResult.recommendation,
         alternativas: apiResult.alternatives?.map(a => ({ praga: a.name, confianca: a.confidence })),
-        embrapa: apiResult.embrapa,
+        pests: convertedPests,
         imagemUrl: apiResult.image?.url ?? null,
       };
 
@@ -299,11 +321,12 @@ export function useReconhecimento() {
   // ========================================
   const saveResult = useCallback(async (
     scoutId: string,
-    overrides?: { pragaNome?: string }
+    overrides?: { pragaNome?: string; contagem?: number }
   ): Promise<Praga | null> => {
     if (!result) return null;
 
     const pragaNome = overrides?.pragaNome ?? result.praga;
+    const contagem = overrides?.contagem ?? 1;
 
     try {
       const now = new Date().toISOString();
@@ -315,6 +338,7 @@ export function useReconhecimento() {
         nome: pragaNome,
         nomePopular: result.nomePopular,
         nomeCientifico: result.nomeCientifico,
+        quantidade: contagem,
         severidade: result.severidade,
         confianca: result.confianca,
         imagemUri: imageUri || undefined,
@@ -324,42 +348,41 @@ export function useReconhecimento() {
         synced: false,
       };
 
-      // Tentar salvar no Supabase só quando temos um marker_id válido (número).
-      // No fluxo de reconhecimento, a tela já insere scout + marker + praga no Supabase;
-      // saveResult é chamado depois com scoutId = "scout_xxx" (id local), então não tentamos
-      // inserir de novo no Supabase (evita erro RLS e insert duplicado).
-      const markerIdNum = typeof scoutId === 'number' ? scoutId : parseInt(String(scoutId), 10);
-      const hasValidMarkerId = Number.isFinite(markerIdNum) && markerIdNum > 0;
+      // The reconhecimento screen already handles Supabase inserts directly.
+      // saveResult only writes to the local WatermelonDB for offline-first storage.
+      // When scoutId is a local ID (scout_xxx), we skip Supabase to avoid duplicates.
+      const scoutIdNum = typeof scoutId === 'number' ? scoutId : parseInt(String(scoutId), 10);
+      const hasValidScoutId = Number.isFinite(scoutIdNum) && scoutIdNum > 0;
 
-      if (hasValidMarkerId) {
+      if (hasValidScoutId) {
         const { supabase, isSupabaseConfigured } = await import('@/services/supabase');
         if (isSupabaseConfigured() && supabase) {
-          const { error: supaError } = await supabase.from('scout_marker_pragas').insert({
-            marker_id: markerIdNum,
-            praga_nome: pragaNome,
-            praga_nome_cientifico: result.nomeCientifico,
+          const { getEmbrapaRecomendacaoId } = await import('@/services/embrapa-recomendacoes');
+          const embrapaRecomendacaoId = await getEmbrapaRecomendacaoId(
+            supabase,
+            pragaNome,
+            result.nomeCientifico ?? null
+          );
+          const { error: supaError } = await supabase.from('scout_pragas').insert({
+            scout_id: scoutIdNum,
+            embrapa_recomendacao_id: embrapaRecomendacaoId,
             tipo_praga: result.tipoPraga ?? 'PRAGA',
-            contagem: 1,
+            contagem,
             presenca: true,
             prioridade: result.severidade === 'critica' ? 'ALTA' : result.severidade === 'alta' ? 'ALTA' : result.severidade === 'media' ? 'MEDIA' : 'BAIXA',
             observacao: result.recomendacao,
             data_contagem: now,
             imagem_url: result.imagemUrl ?? null,
-            fonte: 'MOBILE',
-            openai_confidence: result.confianca,
-            embrapa_praga_id: result.embrapa?.pragaId ?? null,
-            embrapa_produtos_recomendados: result.embrapa?.produtosRecomendados?.length ? result.embrapa.produtosRecomendados : null,
-          } as any);
+          });
 
           if (supaError) {
             logger.error('Erro ao salvar praga no Supabase', { error: supaError });
           } else {
             newPraga.synced = true;
-            logger.info('Praga salva no Supabase', { id: pestId, markerId: markerIdNum, name: pragaNome });
+            logger.info('Praga salva no Supabase', { id: pestId, scoutId: scoutIdNum, name: pragaNome });
           }
         }
       } else {
-        // Fluxo reconhecimento: a tela já inseriu no Supabase; marcar como synced para não tentar de novo.
         newPraga.synced = true;
       }
 
@@ -372,7 +395,7 @@ export function useReconhecimento() {
             id: newPraga.id,
             scout_id: newPraga.scoutId,
             nome: newPraga.nome,
-            quantidade: 1,
+            quantidade: contagem,
             severidade: newPraga.severidade,
             created_at: ts,
             updated_at: ts,
@@ -384,7 +407,6 @@ export function useReconhecimento() {
         logger.info('Praga do reconhecimento salva no WatermelonDB', { id: newPraga.id });
       }
 
-      // Limpar estado
       setResult(null);
       setImageUri(null);
       setIsOfflinePending(false);

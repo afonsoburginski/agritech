@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { BottomSheet, useBottomSheet } from '@/components/ui/bottom-sheet-simple';
 import { useAtividades } from '@/hooks/use-atividades';
-import { useSupabaseActivities, useSupabasePlots, useScoutsByPlot } from '@/hooks/use-supabase-data';
+import { useSupabaseActivities, useSupabasePlots, useScoutsByPlot, fetchTalhaoMonitoramentoDetail, type AtividadeTipo } from '@/hooks/use-supabase-data';
 import { useColor } from '@/hooks/useColor';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
@@ -29,14 +29,15 @@ import {
   X,
   Clock,
   Layers,
-  AlertCircle
+  AlertCircle,
+  FlaskConical
 } from 'lucide-react-native';
 
 interface AtividadeDetalhes {
   id: string | number;
   nome: string;
   descricao?: string;
-  tipo: string;
+  tipo: AtividadeTipo;
   status: string;
   plotId?: string;
   talhaoNome?: string;
@@ -78,12 +79,16 @@ export default function AtividadesScreen() {
   // Estado para edição
   const [editNome, setEditNome] = useState('');
   const [editDescricao, setEditDescricao] = useState('');
-  const [editTipo, setEditTipo] = useState('outros');
+  const [editTipo, setEditTipo] = useState<AtividadeTipo>('OUTROS');
   const [editPlotId, setEditPlotId] = useState<number | string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   
   // Estado para formulário de criação
   const [formPlotId, setFormPlotId] = useState<number | string | null>(null);
+
+  // Recomendações Embrapa do talhão vinculado à tarefa (para exibir no detalhe)
+  const [talhaoRecomendacoes, setTalhaoRecomendacoes] = useState<Array<{ pragaNome: string; recomendacao?: string }>>([]);
+  const [loadingTalhaoRecomendacoes, setLoadingTalhaoRecomendacoes] = useState(false);
   
   // Buscar scouts do talhão da tarefa selecionada
   const { scouts: taskScouts, isLoading: scoutsLoading } = useScoutsByPlot(selectedTask?.plotId);
@@ -91,21 +96,25 @@ export default function AtividadesScreen() {
   // Usar dados do Supabase se online, senão usar dados locais
   const atividades = useMemo(() => {
     if (isOnline && supabaseActivities.length > 0) {
-      return supabaseActivities.map(a => ({
-        id: String(a.id),
-        nome: a.titulo,
-        descricao: a.descricao,
-        tipo: a.tipo || 'outros',
-        status: (a.situacao || 'PENDENTE').toLowerCase(),
-        talhaoNome: undefined,
-        dataInicio: a.dataInicio || a.createdAt,
-        createdAt: a.createdAt,
-        updatedAt: a.createdAt,
-        synced: true,
-      }));
+      return supabaseActivities.map(a => {
+        const firstTalhaoId = a.talhaoIds?.length ? a.talhaoIds[0] : undefined;
+        return {
+          id: String(a.id),
+          nome: a.titulo,
+          descricao: a.descricao,
+          tipo: a.tipo || 'OUTROS',
+          status: (a.situacao || 'PENDENTE').toLowerCase(),
+          plotId: firstTalhaoId != null ? String(firstTalhaoId) : undefined,
+          talhaoNome: firstTalhaoId != null ? plots.find(p => p.id === firstTalhaoId)?.nome : undefined,
+          dataInicio: a.dataInicio || a.createdAt,
+          createdAt: a.createdAt,
+          updatedAt: a.createdAt,
+          synced: true,
+        };
+      });
     }
     return localAtividades;
-  }, [isOnline, supabaseActivities, localAtividades]);
+  }, [isOnline, supabaseActivities, localAtividades, plots]);
   
   // Abrir sheet automaticamente se vier da home screen
   useEffect(() => {
@@ -115,18 +124,53 @@ export default function AtividadesScreen() {
       router.setParams({ openForm: undefined });
     }
   }, [params.openForm, open, router]);
+
+  // Buscar pragas com recomendações Embrapa do talhão quando abrir o detalhe da tarefa
+  useEffect(() => {
+    if (!isDetailVisible || !selectedTask?.plotId) {
+      setTalhaoRecomendacoes([]);
+      return;
+    }
+    const talhaoId = Number(selectedTask.plotId);
+    if (!Number.isFinite(talhaoId)) return;
+
+    let cancelled = false;
+    setLoadingTalhaoRecomendacoes(true);
+    fetchTalhaoMonitoramentoDetail(talhaoId, selectedTask.talhaoNome ?? 'Talhão', undefined, undefined)
+      .then((payload) => {
+        if (cancelled || !payload?.pragas) return;
+        const withRec = payload.pragas.filter(
+          (p) => p.recomendacao && p.recomendacao.trim() !== ''
+        );
+        setTalhaoRecomendacoes(
+          withRec.map((p) => ({
+            pragaNome: p.pragaNome,
+            recomendacao: p.recomendacao,
+          }))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTalhaoRecomendacoes([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTalhaoRecomendacoes(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDetailVisible, selectedTask?.plotId, selectedTask?.talhaoNome]);
   
   // Form state
   const [formNome, setFormNome] = useState('');
   const [formDescricao, setFormDescricao] = useState('');
-  const [formTipo, setFormTipo] = useState('outros');
+  const [formTipo, setFormTipo] = useState<AtividadeTipo>('OUTROS');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Handlers
   const handleNova = () => {
     setFormNome('');
     setFormDescricao('');
-    setFormTipo('outros');
+    setFormTipo('OUTROS');
     setFormPlotId(null);
     open();
   };
@@ -162,7 +206,7 @@ export default function AtividadesScreen() {
         
         await refreshSupabase();
       } else {
-        await concluir(selectedTask.id);
+        await concluir(String(selectedTask.id));
         await refresh();
       }
       
@@ -209,6 +253,7 @@ export default function AtividadesScreen() {
             titulo: editNome.trim(),
             descricao: editDescricao.trim() || null,
             tipo: editTipo,
+            talhao_ids: editPlotId != null ? [Number(editPlotId)] : [],
             updated_at: new Date().toISOString() 
           })
           .eq('id', Number(selectedTask.id));
@@ -259,7 +304,7 @@ export default function AtividadesScreen() {
                 if (error) throw error;
                 await refreshSupabase();
               } else {
-                await remove(selectedTask.id);
+                await remove(String(selectedTask.id));
                 await refresh();
               }
               
@@ -300,7 +345,7 @@ export default function AtividadesScreen() {
           .eq('id', Number(task.id));
         await refreshSupabase();
       } else {
-        await concluir(task.id);
+        await concluir(String(task.id));
         await refresh();
       }
     } catch (error) {
@@ -322,16 +367,17 @@ export default function AtividadesScreen() {
     try {
       setIsSubmitting(true);
       
-      if (isSupabaseConfigured() && supabase) {
+      if (isSupabaseConfigured() && supabase && fazenda?.id) {
         const { error } = await supabase
           .from('atividades')
           .insert({
-            fazenda_id: fazenda?.id,
+            fazenda_id: fazenda.id,
             titulo: formNome.trim(),
             descricao: formDescricao.trim() || null,
             tipo: formTipo,
-            situacao: 'PENDENTE',
-            prioridade: 'NORMAL',
+            situacao: 'PENDENTE' as const,
+            prioridade: 'MEDIA' as const,
+            talhao_ids: formPlotId != null ? [Number(formPlotId)] : [],
           });
         
         if (error) throw error;
@@ -373,15 +419,14 @@ export default function AtividadesScreen() {
     { key: 'concluidas', label: 'Concluídas', count: atividades.filter(a => a.status === 'concluida').length },
   ];
 
-  const tipos = [
-    { value: 'monitoramento', label: 'Monitoramento' },
-    { value: 'scout', label: 'Scout de Campo' },
-    { value: 'amostragem', label: 'Amostragem' },
-    { value: 'identificacao', label: 'Identificação de Praga' },
-    { value: 'controle', label: 'Controle de Praga' },
-    { value: 'avaliacao', label: 'Avaliação de Danos' },
-    { value: 'relatorio', label: 'Relatório' },
-    { value: 'outros', label: 'Outros' },
+  const tipos: { value: AtividadeTipo; label: string }[] = [
+    { value: 'MONITORAMENTO', label: 'Monitoramento' },
+    { value: 'APLICACAO', label: 'Aplicação' },
+    { value: 'CONTROLE_PRAGAS', label: 'Controle de Pragas' },
+    { value: 'VERIFICACAO', label: 'Verificação' },
+    { value: 'PLANTIO', label: 'Plantio' },
+    { value: 'COLHEITA', label: 'Colheita' },
+    { value: 'OUTROS', label: 'Outros' },
   ];
 
   const handlePerfil = () => {
@@ -576,7 +621,6 @@ export default function AtividadesScreen() {
               value={formNome}
               onChangeText={setFormNome}
               containerStyle={styles.input}
-              autoFocus
             />
           </View>
 
@@ -717,75 +761,132 @@ export default function AtividadesScreen() {
       <BottomSheet
         isVisible={isDetailVisible}
         onClose={() => { closeDetail(); setSelectedTask(null); }}
-        title="Detalhes da Tarefa"
+        title={selectedTask?.nome ?? 'Detalhes da Tarefa'}
       >
         {selectedTask && (
-          <View style={styles.detailContainer}>
-            {/* Status da Tarefa */}
-            <View style={[styles.detailStatusCard, { 
-              backgroundColor: selectedTask.status === 'concluida' ? '#10B98115' : 
-                              selectedTask.status === 'em_andamento' ? '#F59E0B15' : primaryColor + '15'
-            }]}>
-              <Icon 
-                name={selectedTask.status === 'concluida' ? CheckCircle2 : Clock} 
-                size={24} 
-                color={selectedTask.status === 'concluida' ? '#10B981' : 
-                       selectedTask.status === 'em_andamento' ? '#F59E0B' : primaryColor} 
-              />
-              <View style={styles.detailStatusInfo}>
-                <Text style={[styles.detailStatusLabel, { 
-                  color: selectedTask.status === 'concluida' ? '#10B981' : 
-                         selectedTask.status === 'em_andamento' ? '#F59E0B' : primaryColor 
-                }]}>
-                  {selectedTask.status === 'concluida' ? 'Concluída' : 
-                   selectedTask.status === 'em_andamento' ? 'Em Andamento' : 'Pendente'}
-                </Text>
-                <Text style={[styles.detailStatusDate, { color: mutedColor }]}>
-                  Criada em {new Date(selectedTask.createdAt).toLocaleDateString('pt-BR')}
-                </Text>
+          <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
+            <View style={styles.detailContainer}>
+              {/* Status da Tarefa */}
+              <View style={[styles.detailStatusCard, { 
+                backgroundColor: selectedTask.status === 'concluida' ? '#10B98115' : 
+                                selectedTask.status === 'em_andamento' ? '#F59E0B15' : primaryColor + '15'
+              }]}>
+                <Icon 
+                  name={selectedTask.status === 'concluida' ? CheckCircle2 : Clock} 
+                  size={24} 
+                  color={selectedTask.status === 'concluida' ? '#10B981' : 
+                         selectedTask.status === 'em_andamento' ? '#F59E0B' : primaryColor} 
+                />
+                <View style={styles.detailStatusInfo}>
+                  <Text style={[styles.detailStatusLabel, { 
+                    color: selectedTask.status === 'concluida' ? '#10B981' : 
+                           selectedTask.status === 'em_andamento' ? '#F59E0B' : primaryColor 
+                  }]}>
+                    {selectedTask.status === 'concluida' ? 'Concluída' : 
+                     selectedTask.status === 'em_andamento' ? 'Em Andamento' : 'Pendente'}
+                  </Text>
+                  <Text style={[styles.detailStatusDate, { color: mutedColor }]}>
+                    Criada em {new Date(selectedTask.createdAt).toLocaleDateString('pt-BR', {
+                      day: '2-digit',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </Text>
+                </View>
               </View>
-            </View>
 
-            {/* Nome e Descrição */}
-            <View style={[styles.detailSection, { borderColor }]}>
-              <Text style={[styles.detailTitle, { color: textColor }]}>
-                {selectedTask.nome}
-              </Text>
-              {selectedTask.descricao && (
-                <Text style={[styles.detailDescription, { color: mutedColor }]}>
-                  {selectedTask.descricao}
-                </Text>
-              )}
-            </View>
+              {/* Descrição */}
+              <View style={[styles.detailSection, { borderColor }]}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name={ClipboardList} size={16} color={primaryColor} />
+                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
+                    Descrição
+                  </Text>
+                </View>
+                {selectedTask.descricao ? (
+                  <Text style={[styles.detailSectionContent, { color: textColor }]}>
+                    {selectedTask.descricao}
+                  </Text>
+                ) : (
+                  <Text style={[styles.detailSectionContent, { color: mutedColor }]}>
+                    Nenhuma descrição informada
+                  </Text>
+                )}
+              </View>
 
-            {/* Informações */}
-            <View style={styles.detailInfoGrid}>
-              <View style={[styles.detailInfoItem, { backgroundColor: cardColor }]}>
-                <Icon name={Layers} size={16} color={mutedColor} />
-                <Text style={[styles.detailInfoLabel, { color: mutedColor }]}>Tipo</Text>
-                <Text style={[styles.detailInfoValue, { color: textColor }]}>
+              {/* Tipo de Atividade */}
+              <View style={[styles.detailSection, { borderColor }]}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name={CheckCircle2} size={16} color={palette.gold} />
+                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
+                    Tipo de Atividade
+                  </Text>
+                </View>
+                <Text style={[styles.detailSectionContent, { color: textColor }]}>
                   {tipos.find(t => t.value === selectedTask.tipo)?.label || selectedTask.tipo}
                 </Text>
               </View>
-              <View style={[styles.detailInfoItem, { backgroundColor: cardColor }]}>
-                <Icon name={MapPin} size={16} color={mutedColor} />
-                <Text style={[styles.detailInfoLabel, { color: mutedColor }]}>Talhão</Text>
-                <Text style={[styles.detailInfoValue, { color: textColor }]}>
+
+              {/* Talhão */}
+              <View style={[styles.detailSection, { borderColor }]}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name={MapPin} size={16} color={primaryColor} />
+                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
+                    Talhão
+                  </Text>
+                </View>
+                <Text style={[styles.detailSectionContent, { color: textColor }]}>
                   {selectedTask.talhaoNome || 'Não definido'}
                 </Text>
               </View>
-            </View>
 
-            {/* Pontos de Monitoramento do Talhão */}
+              {/* Datas */}
+              <View style={[styles.detailSection, { borderColor }]}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name={Calendar} size={16} color={mutedColor} />
+                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
+                    Datas
+                  </Text>
+                </View>
+                <View style={styles.detailDatesList}>
+                  <View style={styles.detailDateRow}>
+                    <Text style={[styles.detailDateLabel, { color: mutedColor }]}>Criada em</Text>
+                    <Text style={[styles.detailDateValue, { color: textColor }]}>
+                      {new Date(selectedTask.createdAt).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      })}
+                    </Text>
+                  </View>
+                  {selectedTask.dataInicio && (
+                    <View style={styles.detailDateRow}>
+                      <Text style={[styles.detailDateLabel, { color: mutedColor }]}>Início previsto</Text>
+                      <Text style={[styles.detailDateValue, { color: textColor }]}>
+                        {new Date(selectedTask.dataInicio).toLocaleDateString('pt-BR', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+            {/* Scouts do talhão vinculado à atividade (atividade é por talhão, não por scout) */}
             {selectedTask.plotId && (
-              <View style={[styles.scoutsSection, { borderColor }]}>
-                <View style={styles.scoutsSectionHeader}>
-                  <Text style={[styles.scoutsSectionTitle, { color: textColor }]}>
-                    Pontos de Monitoramento
+              <View style={[styles.detailSection, { borderColor }]}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name={Layers} size={16} color={primaryColor} />
+                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
+                    Pontos de monitoramento (deste talhão)
                   </Text>
-                  <Text style={[styles.scoutsSectionCount, { color: mutedColor }]}>
-                    {scoutsLoading ? 'Carregando...' : `${taskScouts.length} ponto${taskScouts.length !== 1 ? 's' : ''}`}
-                  </Text>
+                  {!scoutsLoading && (
+                    <Text style={[styles.detailSectionCount, { color: mutedColor }]}>
+                      {taskScouts.length} ponto{taskScouts.length !== 1 ? 's' : ''}
+                    </Text>
+                  )}
                 </View>
                 
                 {scoutsLoading ? (
@@ -862,8 +963,56 @@ export default function AtividadesScreen() {
               </View>
             )}
 
-            {/* Ações */}
-            <View style={styles.detailActions}>
+            {/* Recomendações para o talhão desta tarefa */}
+            {selectedTask.plotId && (
+              <View style={[styles.detailSection, { borderColor }]}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name={FlaskConical} size={16} color="#16A34A" />
+                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
+                    Recomendações (este talhão)
+                  </Text>
+                </View>
+                {loadingTalhaoRecomendacoes ? (
+                  <ActivityIndicator size="small" color="#16A34A" style={{ marginVertical: 12 }} />
+                ) : talhaoRecomendacoes.length === 0 ? (
+                  <Text style={[styles.embrapaEmptyText, { color: mutedColor }]}>
+                    Nenhuma recomendação registrada para as pragas deste talhão. Faça um monitoramento com identificação por IA para gerar recomendações.
+                  </Text>
+                ) : (
+                  <View style={styles.embrapaProductsList}>
+                    {talhaoRecomendacoes.map((p, idx) => (
+                      <View key={`${p.pragaNome}-${idx}`} style={[styles.embrapaPragaBlock, { borderColor: borderColor + '80' }]}>
+                        <Text style={[styles.embrapaPragaNome, { color: textColor }]}>{p.pragaNome}</Text>
+                        {p.recomendacao ? (
+                          <Text style={[styles.embrapaRecText, { color: mutedColor }]}>{p.recomendacao}</Text>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
+              {/* Status de sincronização */}
+              <View style={styles.detailSyncRow}>
+                <View style={[
+                  styles.syncBadge, 
+                  { backgroundColor: selectedTask.synced ? '#10B98120' : '#F59E0B20' }
+                ]}>
+                  <View style={[
+                    styles.syncDot,
+                    { backgroundColor: selectedTask.synced ? '#10B981' : '#F59E0B' }
+                  ]} />
+                  <Text style={[styles.syncText, { 
+                    color: selectedTask.synced ? '#10B981' : '#F59E0B' 
+                  }]}>
+                    {selectedTask.synced ? 'Sincronizado' : 'Aguardando sincronização'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Ações */}
+              <View style={styles.detailActions}>
               <TouchableOpacity 
                 style={[styles.detailActionBtn, { backgroundColor: '#10B98115' }]}
                 onPress={handleToggleStatus}
@@ -896,14 +1045,15 @@ export default function AtividadesScreen() {
               </TouchableOpacity>
             </View>
 
-            <Button
-              variant="outline"
-              onPress={() => { closeDetail(); setSelectedTask(null); }}
-              style={styles.closeDetailBtn}
-            >
-              <Text>Fechar</Text>
-            </Button>
-          </View>
+              <Button
+                variant="outline"
+                onPress={() => { closeDetail(); setSelectedTask(null); }}
+                style={styles.closeDetailBtn}
+              >
+                <Text>Fechar</Text>
+              </Button>
+            </View>
+          </ScrollView>
         )}
       </BottomSheet>
 
@@ -1293,9 +1443,13 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
   // Estilos para modal de detalhes
+  detailScroll: {
+    maxHeight: '100%',
+  },
   detailContainer: {
     gap: 16,
     paddingTop: 8,
+    paddingBottom: 24,
   },
   detailStatusCard: {
     flexDirection: 'row',
@@ -1316,8 +1470,62 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   detailSection: {
-    paddingBottom: 16,
-    borderBottomWidth: 1,
+    borderTopWidth: 1,
+    paddingTop: 16,
+  },
+  detailSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  detailSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  detailSectionCount: {
+    fontSize: 12,
+  },
+  detailSectionContent: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  detailDatesList: {
+    gap: 8,
+  },
+  detailDateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  detailDateLabel: {
+    fontSize: 13,
+  },
+  detailDateValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  detailSyncRow: {
+    alignItems: 'flex-start',
+    marginTop: 4,
+  },
+  syncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+  },
+  syncDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  syncText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   detailTitle: {
     fontSize: 20,
@@ -1477,5 +1685,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     marginTop: 4,
+  },
+  embrapaEmptyText: {
+    fontSize: 13,
+    lineHeight: 20,
+    paddingVertical: 8,
+  },
+  embrapaProductsList: {
+    gap: 12,
+  },
+  embrapaPragaBlock: {
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  embrapaPragaNome: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  embrapaRecText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  embrapaProductRow: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  embrapaProductNome: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  embrapaProductIngrediente: {
+    fontSize: 11,
+    marginTop: 2,
   },
 });

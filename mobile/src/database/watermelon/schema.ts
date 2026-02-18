@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const appSchemaWatermelon = appSchema({
-  version: 1,
+  version: 2,
   tables: [
     tableSchema({
       name: 'atividades',
@@ -38,6 +38,7 @@ export const appSchemaWatermelon = appSchema({
       columns: [
         { name: 'scout_id', type: 'string', isIndexed: true },
         { name: 'nome', type: 'string' },
+        { name: 'embrapa_recomendacao_id', type: 'string', isOptional: true },
         { name: 'quantidade', type: 'number', isOptional: true },
         { name: 'severidade', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },

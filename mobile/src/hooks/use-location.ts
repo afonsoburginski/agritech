@@ -6,7 +6,7 @@ interface UseLocationReturn {
   loading: boolean;
   error: string | null;
   location: LocationObject | null;
-  captureLocation: () => Promise<void>;
+  captureLocation: () => Promise<LocationObject | null>;
   clearError: () => void;
 }
 
@@ -18,7 +18,7 @@ export function useLocation(): UseLocationReturn {
   const [error, setError] = useState<string | null>(null);
   const [location, setLocation] = useState<LocationObject | null>(null);
 
-  const captureLocation = async (): Promise<void> => {
+  const captureLocation = async (): Promise<LocationObject | null> => {
     try {
       setLoading(true);
       setError(null);
@@ -33,10 +33,12 @@ export function useLocation(): UseLocationReturn {
         longitude: capturedLocation.longitude,
         accuracy: capturedLocation.accuracy,
       });
+      return capturedLocation;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro ao capturar localização';
       setError(errorMessage);
       logger.error('Erro ao capturar localização', { error: err }, err as Error);
+      return null;
     } finally {
       setLoading(false);
     }

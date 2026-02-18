@@ -10,6 +10,8 @@ import * as Sharing from 'expo-sharing';
 import { logger } from './logger';
 import { generateTechnicalReportHTML, type TechnicalReportData } from '@/templates/report-technical';
 import { generatePestDiseaseReportHTML, type PestDiseaseReportData } from '@/templates/report-pest-disease';
+import { getHeatmapSVG } from '@/components/maps/heatmap';
+import { parseTalhaoCoordinates } from '@/hooks/use-supabase-data';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 export type ReportType = 'technical' | 'pest-disease';
@@ -36,17 +38,14 @@ async function fetchReportData(fazendaId: number): Promise<{
     const [fazendaRes, talhoesRes, scoutsRes] = await Promise.all([
       supabase.from('fazendas').select('*').eq('id', fazendaId).single(),
       supabase.from('talhoes').select('*').eq('fazenda_id', fazendaId),
-      supabase.from('scouts').select('*, scout_markers(*, scout_marker_pragas(*))').eq('fazenda_id', fazendaId).order('created_at', { ascending: false }).limit(20),
+      supabase.from('scouts').select('*, scout_pragas(*, embrapa_recomendacoes(nome_praga, nome_cientifico, tipo, descricao))').eq('fazenda_id', fazendaId).order('created_at', { ascending: false }).limit(20),
     ]);
 
     const allPragas: any[] = [];
     if (scoutsRes.data) {
       for (const scout of scoutsRes.data) {
-        const markers = (scout as any).scout_markers ?? [];
-        for (const marker of markers) {
-          const pests = marker.scout_marker_pragas ?? [];
-          allPragas.push(...pests);
-        }
+        const pragas = (scout as any).scout_pragas ?? [];
+        allPragas.push(...pragas);
       }
     }
 
@@ -75,29 +74,26 @@ function buildReportData(
 
   const pragasByName = new Map<string, any[]>();
   for (const p of pragas) {
-    const name = p.praga_nome ?? 'Desconhecida';
+    const er = p.embrapa_recomendacoes ?? {};
+    const name = er.nome_praga ?? 'Desconhecida';
     if (!pragasByName.has(name)) pragasByName.set(name, []);
     pragasByName.get(name)!.push(p);
   }
 
   const pragaItems = Array.from(pragasByName.entries()).map(([nome, items]) => {
     const totalCount = items.reduce((s: number, i: any) => s + (i.contagem ?? 1), 0);
-    const avgConfidence = items.reduce((s: number, i: any) => s + (i.openai_confidence ?? 0), 0) / items.length;
     const highPriority = items.some((i: any) => i.prioridade === 'ALTA');
-    const embrapaProds = items.find((i: any) => i.embrapa_produtos_recomendados)?.embrapa_produtos_recomendados ?? [];
+    const firstEr = items[0]?.embrapa_recomendacoes ?? {};
+    const recomendacao = firstEr.descricao ?? undefined;
 
     return {
       nome,
-      nomeCientifico: items[0]?.praga_nome_cientifico ?? undefined,
-      taxaOcorrencia: `${totalCount} ocorrência(s) | Confiança IA: ${(avgConfidence * 100).toFixed(0)}%`,
-      pontosCriticos: items.map((i: any) => `Marker #${i.marker_id}`).slice(0, 3).join(', '),
-      estadioPredominante: items[0]?.estadio_fenologico ?? 'Não determinado',
+      nomeCientifico: firstEr.nome_cientifico ?? undefined,
+      taxaOcorrencia: `${totalCount} ocorrência(s)`,
+      pontosCriticos: items.map((i: any) => `Scout #${i.scout_id}`).slice(0, 3).join(', '),
+      estadioPredominante: 'Não determinado',
       riscoLavoura: highPriority ? 'Alto' : 'Médio',
-      manejoQuimico: embrapaProds[0] ? {
-        produto: embrapaProds[0].nome ?? 'Consultar AGROFIT',
-        dose: 'Conforme bula',
-        intervalo: 'Conforme bula',
-      } : undefined,
+      recomendacao,
       boasPraticas: [
         'Monitorar continuamente a área afetada',
         'Registrar aplicações no sistema AGROV',
@@ -106,8 +102,9 @@ function buildReportData(
     };
   });
 
-  const pragasList = pragaItems.filter(p => pragas.find((x: any) => x.praga_nome === p.nome && x.tipo_praga === 'PRAGA'));
-  const doencasList = pragaItems.filter(p => pragas.find((x: any) => x.praga_nome === p.nome && x.tipo_praga === 'DOENCA'));
+  const pragaNome = (x: any) => (x.embrapa_recomendacoes ?? {}).nome_praga;
+  const pragasList = pragaItems.filter(p => pragas.find((x: any) => pragaNome(x) === p.nome && (x.tipo_praga ?? (x.embrapa_recomendacoes ?? {}).tipo) === 'PRAGA'));
+  const doencasList = pragaItems.filter(p => pragas.find((x: any) => pragaNome(x) === p.nome && (x.tipo_praga ?? (x.embrapa_recomendacoes ?? {}).tipo) === 'DOENCA'));
 
   const principaisPragas = pragasList.map(p => p.nome).slice(0, 5);
   const principaisDoencas = doencasList.map(d => d.nome).slice(0, 5);
@@ -119,11 +116,37 @@ function buildReportData(
     pragas.filter((p: any) => p.prioridade === 'ALTA').length > pragas.length * 0.3 ? 'Alto' :
     pragas.filter((p: any) => p.prioridade === 'MEDIA' || p.prioridade === 'ALTA').length > pragas.length * 0.3 ? 'Moderado' : 'Baixo';
 
+  const aplicativo = 'FOX-FIELDCORE';
+  const areaMaiorIncidencia = areasCriticas.length > 0 ? areasCriticas[0] : 'Nenhuma área com incidência relevante';
+  const dataProximo = new Date(now);
+  dataProximo.setDate(dataProximo.getDate() + 7);
+  const dataProximoRelatorio = dataProximo.toLocaleDateString('pt-BR');
+  const periodoDatas = `${new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-BR')} a ${dataRelatorio}`;
+
+  const heatMapPoints = pragas
+    .filter((p: any) => p.coordinates?.type === 'Point' && Array.isArray(p.coordinates?.coordinates) && p.coordinates.coordinates.length >= 2)
+    .map((p: any) => {
+      const [lng, lat] = p.coordinates.coordinates;
+      const contagem = p.contagem ?? 1;
+      const intensity = contagem <= 0 ? 0.05 : Math.min(1, 1 - Math.exp(-contagem / 4));
+      return {
+        lat: Number(lat),
+        lng: Number(lng),
+        intensity,
+      };
+    });
+  const talhoesForSvg = (talhoes ?? []).map((t: any) => {
+    const coords = parseTalhaoCoordinates(t.coordinates);
+    return { nome: t.nome ?? '', color: t.color ?? undefined, coords };
+  }).filter((t: { coords: number[][] }) => t.coords.length >= 3);
+
   return {
+    aplicativo,
     fazendaNome: fazenda?.nome ?? 'Fazenda não especificada',
     areaMonitorada: String(fazenda?.area_total ?? talhoes.reduce((s: number, t: any) => s + (Number(t.area) || 0), 0)),
     dataRelatorio,
     responsavelTecnico: responsavel || 'Não informado',
+    periodoDatas,
     resumoExecutivo: {
       nivelInfestacao,
       principaisPragas: principaisPragas.length > 0 ? principaisPragas : ['Nenhuma detectada'],
@@ -133,6 +156,11 @@ function buildReportData(
         ? 'Manter monitoramento regular conforme calendário.'
         : `Intensificar monitoramento nas áreas com detecção de pragas. ${principaisPragas.length > 0 ? `Priorizar controle de ${principaisPragas[0]}.` : ''}`,
     },
+    observacoesTecnicas: {
+      areaMaiorIncidencia,
+      tendencia48h: pragas.length === 0 ? 'Estabilidade' : 'Acompanhar evolução (dados em tempo real)',
+      condicoesClimaticas: 'Umidade, temperatura e precipitação conforme estações do aplicativo',
+    },
     pragas: pragasList.length > 0 ? pragasList : pragaItems,
     doencas: doencasList.map(d => ({
       nome: d.nome,
@@ -140,32 +168,33 @@ function buildReportData(
       nivelSeveridade: d.riscoLavoura === 'Alto' ? 'Severo' : 'Moderado',
       condicoesFavoraveis: 'Alta umidade, temperatura amena',
       talhoesAfetados: d.pontosCriticos,
-      fungicida: d.manejoQuimico ? {
-        nome: d.manejoQuimico.produto,
-        dose: d.manejoQuimico.dose,
-        intervalo: d.manejoQuimico.intervalo,
-      } : undefined,
+      fungicida: undefined,
       frequenciaInspecao: 'A cada 2 dias',
       focosObservacao: d.pontosCriticos,
       intervaloReentrada: '24 horas',
       epiRecomendados: 'Luvas, máscara, óculos, macacão impermeável',
     })),
     comparativoHistorico: [
-      { periodo: 'Último monitoramento', infestacaoGeral: `${pragas.length} ocorrência(s)`, variacao: '—', comentario: 'Situação atual' },
-      { periodo: 'Monitoramento anterior', infestacaoGeral: '—', variacao: '—', comentario: 'Dados insuficientes' },
-      { periodo: 'Média do período', infestacaoGeral: '—', variacao: '—', comentario: 'Dados insuficientes' },
+      { periodo: 'Semana Atual', infestacaoGeral: pragas.length > 0 ? `${pragas.length} ocorrência(s)` : '0%', variacao: '—', comentario: 'Situação atual' },
+      { periodo: 'Semana Anterior', infestacaoGeral: '—', variacao: '—', comentario: 'Tendência' },
+      { periodo: 'Média do Mês', infestacaoGeral: '—', variacao: '—', comentario: 'Estabilidade' },
     ],
     recomendacoes: [
-      `Intensificar monitoramento nas áreas com maior incidência`,
-      'Ajustar calendário de aplicação conforme resultados',
-      'Aumentar frequência de inspeções em áreas com reincidência',
-      'Revisar condições de irrigação para mitigar propagação de doenças',
-      'Realizar limpeza de equipamentos entre talhões para evitar contaminação cruzada',
-      'Documentar todas as aplicações realizadas no AGROV',
+      'Intensificar monitoramento em ' + (areasCriticas.length > 0 ? areasCriticas[0] : 'áreas de maior incidência'),
+      `Ajustar calendário de aplicação para ${dataProximoRelatorio}`,
+      'Aumentar uso de controle biológico em áreas com reincidência',
+      'Revisar condições de irrigação para evitar ambiente favorável a pragas e doenças',
+      'Realizar limpeza de equipamentos entre talhões',
+      'Documentar todas as aplicações realizadas',
     ],
     conclusao: pragas.length === 0
       ? `O monitoramento realizado em ${dataRelatorio} não identificou focos críticos de pragas ou doenças na propriedade ${fazenda?.nome ?? ''}. Recomenda-se manter o calendário regular de monitoramento.`
-      : `O monitoramento realizado em ${dataRelatorio} identificou ${pragas.length} ocorrência(s) de pragas/doenças na propriedade ${fazenda?.nome ?? ''}. ${principaisPragas.length > 0 ? `As principais pragas detectadas foram: ${principaisPragas.join(', ')}.` : ''} Recomenda-se seguir as ações de manejo indicadas neste relatório e agendar novo monitoramento em 7 dias.`,
+      : `O sistema ${aplicativo} detectou pontos críticos que exigem atenção imediata, principalmente em ${areaMaiorIncidencia}. Seguindo as recomendações acima, a tendência é reduzir significativamente o risco nas próximas 48 a 72 horas.`,
+    conclusaoParagrafo2: pragas.length === 0
+      ? 'Nenhum foco crítico identificado. Manter monitoramento de rotina.'
+      : `O monitoramento realizado em ${dataRelatorio} identificou ${pragas.length} ocorrência(s) de pragas/doenças na propriedade ${fazenda?.nome ?? ''}. ${principaisPragas.length > 0 ? `Principais pragas: ${principaisPragas.join(', ')}.` : ''} Recomenda-se seguir as ações de manejo indicadas e agendar novo monitoramento em 7 dias.`,
+    dataProximoRelatorio,
+    heatmapSvg: getHeatmapSVG(heatMapPoints, talhoesForSvg),
   };
 }
 

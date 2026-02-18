@@ -24,18 +24,16 @@ import { processRecognitionQueue } from './recognition-queue-service';
 export type SyncOperation = 'create' | 'update' | 'delete';
 export type EntityType = 'atividades' | 'scouts' | 'pragas';
 
-// Mapeamento de tabelas SQLite → Supabase (novo schema pt-BR)
 const TABLE_MAP: Record<EntityType, string> = {
   atividades: 'atividades',
   scouts: 'scouts',
-  pragas: 'scout_marker_pragas',
+  pragas: 'scout_pragas',
 };
 
-// Mapeamento inverso Supabase → SQLite
 const REVERSE_TABLE_MAP: Record<string, EntityType> = {
   atividades: 'atividades',
   scouts: 'scouts',
-  scout_marker_pragas: 'pragas',
+  scout_pragas: 'pragas',
 };
 
 
@@ -367,51 +365,48 @@ class SyncService {
         .from('scouts')
         .select('*')
         .in('fazenda_id', fazendaIds)
-        .is('deleted_at', null)
         .order('updated_at', { ascending: false });
 
       if (error) {
         logger.warn('Erro ao baixar scouts', { error: error.message });
       } else if (scouts?.length) {
         const scoutIds = scouts.map((s: { id: number }) => s.id);
-        const { data: markers } = await supabase
-          .from('scout_markers')
-          .select('scout_id, latitude, longitude')
+
+        const { data: firstPragas } = await supabase
+          .from('scout_pragas')
+          .select('scout_id, coordinates')
           .in('scout_id', scoutIds);
 
-        const firstMarkerByScout = new Map<number, { latitude: number; longitude: number }>();
-        for (const m of markers ?? []) {
-          if (!firstMarkerByScout.has(m.scout_id)) {
-            firstMarkerByScout.set(m.scout_id, {
-              latitude: parseFloat(m.latitude) || 0,
-              longitude: parseFloat(m.longitude) || 0,
+        const firstCoordByScout = new Map<number, { latitude: number; longitude: number }>();
+        for (const p of firstPragas ?? []) {
+          if (!firstCoordByScout.has(p.scout_id) && p.coordinates?.type === 'Point' && Array.isArray(p.coordinates?.coordinates) && p.coordinates.coordinates.length >= 2) {
+            const [lng, lat] = p.coordinates.coordinates;
+            firstCoordByScout.set(p.scout_id, {
+              latitude: Number(lat) || 0,
+              longitude: Number(lng) || 0,
             });
           }
         }
 
         for (const row of scouts) {
-          const marker = firstMarkerByScout.get(row.id);
-          await this.upsertLocalRecord('scouts', this.mapRemoteScout(row, marker));
+          const coord = firstCoordByScout.get(row.id);
+          await this.upsertLocalRecord('scouts', this.mapRemoteScout(row, coord));
         }
         logger.info('Scouts baixados para WatermelonDB', { count: scouts.length });
 
-        // 3) Pragas (scout_marker_pragas) dos scouts que já baixamos
+        // 3) Pragas (scout_pragas) dos scouts que já baixamos
         const { data: pragasRows, error: pragasError } = await supabase
-          .from('scout_marker_pragas')
-          .select('id, marker_id, praga_nome, contagem, prioridade, data_contagem, created_at, updated_at, scout_markers(scout_id)')
+          .from('scout_pragas')
+          .select('id, scout_id, embrapa_recomendacao_id, contagem, prioridade, data_contagem, created_at, updated_at, embrapa_recomendacoes(nome_praga)')
+          .in('scout_id', scoutIds)
           .order('data_contagem', { ascending: false });
 
         if (pragasError) {
           logger.warn('Erro ao baixar pragas', { error: pragasError.message });
         } else if (pragasRows?.length) {
-          const scoutIdSet = new Set(scoutIds);
           let count = 0;
           for (const row of pragasRows) {
-            const rawMarker = row.scout_markers;
-            const marker = Array.isArray(rawMarker) ? rawMarker[0] : rawMarker;
-            const scoutId = (marker as { scout_id?: number } | null)?.scout_id;
-            if (scoutId == null || !scoutIdSet.has(scoutId)) continue;
-            await this.upsertLocalRecord('pragas', this.mapRemotePraga(row, scoutId));
+            await this.upsertLocalRecord('pragas', this.mapRemotePraga(row, row.scout_id));
             count++;
           }
           logger.info('Pragas baixadas para WatermelonDB', { count });
@@ -457,10 +452,12 @@ class SyncService {
   private mapRemotePraga(row: any, scoutId: number): any {
     const created = row.data_contagem ? new Date(row.data_contagem).getTime() : (row.created_at ? new Date(row.created_at).getTime() : Date.now());
     const updated = row.updated_at ? new Date(row.updated_at).getTime() : created;
+    const er = row.embrapa_recomendacoes ?? {};
     return {
       id: String(row.id),
       scoutId: String(scoutId),
-      nome: row.praga_nome ?? '',
+      nome: er.nome_praga ?? '',
+      embrapaRecomendacaoId: row.embrapa_recomendacao_id != null ? String(row.embrapa_recomendacao_id) : null,
       quantidade: row.contagem ?? 1,
       severidade: row.prioridade ?? null,
       createdAt: created,
@@ -566,6 +563,7 @@ class SyncService {
             id: data.id,
             scout_id: data.scoutId,
             nome: data.nome ?? '',
+            embrapa_recomendacao_id: data.embrapaRecomendacaoId ?? null,
             quantidade: data.quantidade ?? null,
             severidade: data.severidade ?? null,
             created_at: created,
@@ -625,6 +623,7 @@ class SyncService {
           await rec.update((r) => {
             r.scoutId = data.scoutId ?? r.scoutId;
             r.nome = data.nome ?? r.nome;
+            r.embrapaRecomendacaoId = data.embrapaRecomendacaoId ?? r.embrapaRecomendacaoId;
             r.quantidade = data.quantidade ?? r.quantidade;
             r.severidade = data.severidade ?? r.severidade;
             r.updatedAt = new Date(updated);

@@ -1,5 +1,6 @@
 import { Database } from '@nozbe/watermelondb';
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
+import Constants from 'expo-constants';
 import { logger } from '@/services/logger';
 import { appSchemaWatermelon } from './schema';
 import { migrations } from './migrations';
@@ -8,14 +9,23 @@ import { Atividade, Scout, Praga, SyncQueue, PendingRecognition } from './models
 let databaseInstance: Database | null = null;
 let initError: Error | null = null;
 
+/** Expo Go não inclui o módulo nativo do SQLite/JSI; não tentamos inicializar para evitar erro. */
+function isExpoGo(): boolean {
+  return Constants.executionEnvironment === 'storeClient';
+}
+
 /**
  * Inicializa o WatermelonDB (SQLite nativo).
- * Em Expo Go o módulo nativo pode não existir; nesse caso retorna null e os hooks usam fallback em memória.
+ * No Expo Go retorna null sem tentar carregar o nativo; os hooks usam fallback em memória/Supabase.
  * Use um development build (expo run:ios / expo run:android) para persistência offline completa.
  */
 export async function initWatermelonDB(): Promise<Database | null> {
   if (databaseInstance) return databaseInstance;
   if (initError) return null;
+
+  if (isExpoGo()) {
+    return null;
+  }
 
   try {
     const adapter = new SQLiteAdapter({
@@ -36,7 +46,6 @@ export async function initWatermelonDB(): Promise<Database | null> {
     return db;
   } catch (e: any) {
     initError = e;
-    // Em Expo Go o SQLite/JSI não está disponível; fallback em memória é esperado.
     return null;
   }
 }

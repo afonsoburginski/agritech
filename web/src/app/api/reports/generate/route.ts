@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       supabaseAdmin.from('talhoes').select('*').eq('fazenda_id', fazendaId),
       supabaseAdmin
         .from('scouts')
-        .select('*, scout_markers(*, scout_marker_pragas(*))')
+        .select('*, scout_pragas(*, embrapa_recomendacoes(nome_praga, nome_cientifico, tipo, descricao))')
         .eq('fazenda_id', fazendaId)
         .order('created_at', { ascending: false })
         .limit(20),
@@ -45,44 +45,35 @@ export async function POST(request: NextRequest) {
     const fazenda = fazendaRes.data;
     const talhoes = talhoesRes.data ?? [];
 
-    // Collect all pragas from scouts -> markers -> pragas
     const allPragas: any[] = [];
     if (scoutsRes.data) {
       for (const scout of scoutsRes.data) {
-        const markers = (scout as any).scout_markers ?? [];
-        for (const marker of markers) {
-          const pests = marker.scout_marker_pragas ?? [];
-          allPragas.push(...pests);
-        }
+        const pragas = (scout as any).scout_pragas ?? [];
+        allPragas.push(...pragas);
       }
     }
 
-    // Group pragas by name
     const pragasByName = new Map<string, any[]>();
     for (const p of allPragas) {
-      const name = p.praga_nome ?? 'Desconhecida';
+      const er = p.embrapa_recomendacoes ?? {};
+      const name = er.nome_praga ?? 'Desconhecida';
       if (!pragasByName.has(name)) pragasByName.set(name, []);
       pragasByName.get(name)!.push(p);
     }
 
     const pragaItems = Array.from(pragasByName.entries()).map(([nome, items]) => {
       const totalCount = items.reduce((s: number, i: any) => s + (i.contagem ?? 1), 0);
-      const avgConfidence = items.reduce((s: number, i: any) => s + (i.openai_confidence ?? 0), 0) / items.length;
       const highPriority = items.some((i: any) => i.prioridade === 'ALTA');
-      const embrapaProds = items.find((i: any) => i.embrapa_produtos_recomendados)?.embrapa_produtos_recomendados ?? [];
+      const firstEr = items[0]?.embrapa_recomendacoes ?? {};
 
       return {
         nome,
-        nomeCientifico: items[0]?.praga_nome_cientifico ?? undefined,
-        taxaOcorrencia: `${totalCount} ocorrência(s) | Confiança IA: ${(avgConfidence * 100).toFixed(0)}%`,
-        pontosCriticos: items.map((i: any) => `Marker #${i.marker_id}`).slice(0, 3).join(', '),
-        estadioPredominante: items[0]?.estadio_fenologico ?? 'Não determinado',
+        nomeCientifico: firstEr.nome_cientifico ?? undefined,
+        taxaOcorrencia: `${totalCount} ocorrência(s)`,
+        pontosCriticos: items.map((i: any) => `Scout #${i.scout_id}`).slice(0, 3).join(', '),
+        estadioPredominante: 'Não determinado',
         riscoLavoura: highPriority ? 'Alto' : 'Médio',
-        manejoQuimico: embrapaProds[0] ? {
-          produto: embrapaProds[0].nome ?? 'Consultar AGROFIT',
-          dose: 'Conforme bula',
-          intervalo: 'Conforme bula',
-        } : undefined,
+        recomendacao: firstEr.descricao ?? undefined,
         boasPraticas: [
           'Monitorar continuamente a área afetada',
           'Registrar aplicações no sistema AGROV',

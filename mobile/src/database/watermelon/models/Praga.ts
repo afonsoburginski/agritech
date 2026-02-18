@@ -11,6 +11,7 @@ export default class Praga extends Model {
 
   @field('scout_id') scoutId!: string;
   @field('nome') nome!: string;
+  @field('embrapa_recomendacao_id') embrapaRecomendacaoId!: string | null;
   @field('quantidade') quantidade!: number | null;
   @field('severidade') severidade!: string | null;
   @date('created_at') createdAt!: Date;

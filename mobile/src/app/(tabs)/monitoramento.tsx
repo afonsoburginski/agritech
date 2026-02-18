@@ -1,21 +1,22 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image } from 'react-native';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image, SectionList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
 import { BottomSheet, useBottomSheet } from '@/components/ui/bottom-sheet-simple';
+import { MonitoramentoDetailSheet, type MonitoramentoDetailPraga } from '@/components/monitoramento-detail-sheet';
 import { useScouts } from '@/hooks/use-scouts';
-import { useSupabaseScouts, usePestsByScout, SupabasePest } from '@/hooks/use-supabase-data';
+import { useSupabaseScouts, fetchTalhaoMonitoramentoDetail } from '@/hooks/use-supabase-data';
 import { useLocation } from '@/hooks/use-location';
 import { useColor } from '@/hooks/useColor';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
 import { useAvatarUri, useAppStore } from '@/stores/app-store';
-import { 
-  Bug, 
-  Search, 
+import {
+  Bug,
+  Search,
   Plus,
   MapPin,
   Calendar,
@@ -23,25 +24,64 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
-  Navigation,
-  Clock,
-  CheckCircle,
-  XCircle
+  TrendingUp,
+  TrendingDown,
+  Minus as MinusIcon,
 } from 'lucide-react-native';
-
-type TabType = 'todos' | 'visitados' | 'pendentes';
 
 interface ScoutDetail {
   id: string;
   latitude: number;
   longitude: number;
   talhaoNome?: string;
+  talhaoId?: number;
+  talhaoArea?: number;
+  talhaoCulturaAtual?: string;
+  talhaoCultura?: import('@/types/supabase').CulturaTalhaoEnum | null;
+  talhaoPercentualInfestacao?: number;
   visitado: boolean;
   dataVisita?: string;
   pragasCount: number;
   observacoes?: string;
   createdAt: string;
   synced: boolean;
+}
+
+interface TalhaoMonth {
+  key: string;
+  talhaoNome: string;
+  talhaoId?: number;
+  talhaoArea?: number;
+  talhaoCulturaAtual?: string;
+  /** Percentual de infestação do talhão (0–100), calculado em tempo real no banco */
+  talhaoPercentualInfestacao?: number;
+  totalPragas: number;
+  scoutCount: number;
+  latestScout: ScoutDetail;
+  /** Delta vs previous month: positive=more pests, negative=fewer, null=no data */
+  trend: number | null;
+}
+
+interface MonthSection {
+  title: string;
+  monthKey: string;
+  data: TalhaoMonth[];
+}
+
+const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+function getMonthKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(key: string): string {
+  const [year, month] = key.split('-');
+  const now = new Date();
+  const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthName = MONTH_NAMES[parseInt(month, 10) - 1] ?? month;
+  if (key === currentKey) return `${monthName} ${year} (atual)`;
+  return `${monthName} ${year}`;
 }
 
 export default function MonitoramentoScreen() {
@@ -54,108 +94,218 @@ export default function MonitoramentoScreen() {
   const borderColor = useColor({}, 'border');
   const primaryColor = useColor({}, 'primary');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<TabType>('todos');
-  
-  // Hooks
+
   const { isOnline } = useAppStore();
   const { scouts: localScouts, create, refresh } = useScouts();
   const { scouts: supabaseScouts, isLoading, refresh: refreshSupabase } = useSupabaseScouts();
   const { location, captureLocation } = useLocation();
   const { isVisible, open, close } = useBottomSheet();
-  const { isVisible: isDetailVisible, open: openDetail, close: closeDetail } = useBottomSheet();
+  const [detailSheetVisible, setDetailSheetVisible] = useState(false);
+  const [detailPayload, setDetailPayload] = useState<{
+    title: string;
+    talhaoArea?: number;
+    talhaoCulturaAtual?: string;
+    percentualInfestacao?: number;
+    latitude?: number;
+    longitude?: number;
+    visitado: boolean;
+    dataVisita?: string;
+    pragas: MonitoramentoDetailPraga[];
+    pestsLoading?: boolean;
+    observacoes?: string;
+    synced: boolean;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedScout, setSelectedScout] = useState<ScoutDetail | null>(null);
-  
-  // Buscar pragas do scout selecionado
-  const { pests: scoutPests, isLoading: pestsLoading } = usePestsByScout(selectedScout?.id || null);
 
-  // Ao voltar para a tela (ex.: após salvar reconhecimento), atualizar listas
   useFocusEffect(
     useCallback(() => {
       refreshSupabase();
       refresh();
     }, [refreshSupabase, refresh])
   );
-  
-  // Abrir modal de detalhes
-  const handleScoutPress = (scout: ScoutDetail) => {
-    setSelectedScout(scout);
-    openDetail();
-  };
-  
-  // Função para obter cor baseada na severidade
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critica': return '#DC2626';
-      case 'alta': return '#EA580C';
-      case 'media': return '#F59E0B';
-      case 'baixa': return '#10B981';
-      default: return '#6B7280';
+
+  const handleTalhaoPress = async (item: TalhaoMonth, monthKey: string) => {
+    const scout = item.latestScout;
+    const title = item.talhaoNome || `Ponto ${scout.id.slice(-6)}`;
+    const onClose = () => setDetailSheetVisible(false);
+
+    // Show loading state immediately
+    setDetailPayload({
+      title,
+      talhaoArea: item.talhaoArea,
+      talhaoCulturaAtual: item.talhaoCulturaAtual,
+      percentualInfestacao: item.talhaoPercentualInfestacao,
+      latitude: scout.latitude,
+      longitude: scout.longitude,
+      visitado: scout.visitado,
+      dataVisita: scout.dataVisita,
+      pragas: [],
+      pestsLoading: true,
+      observacoes: scout.observacoes,
+      synced: scout.synced,
+    });
+    setDetailSheetVisible(true);
+
+    // Use RPC to fetch all pests for this talhão (scoped to month)
+    if (item.talhaoId != null) {
+      const [year, month] = monthKey.split('-').map(Number);
+      const monthStart = new Date(year, month - 1, 1).toISOString();
+      const payload = await fetchTalhaoMonitoramentoDetail(item.talhaoId, title, onClose, monthStart);
+      if (payload) {
+        setDetailPayload({
+          title: payload.title,
+          talhaoArea: payload.talhaoArea,
+          talhaoCulturaAtual: payload.talhaoCulturaAtual,
+          percentualInfestacao: payload.percentualInfestacao,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          visitado: scout.visitado,
+          dataVisita: scout.dataVisita,
+          pragas: payload.pragas,
+          pestsLoading: false,
+          observacoes: payload.observacoes,
+          synced: scout.synced,
+        });
+        return;
+      }
     }
+
+    // Fallback: no talhaoId or RPC failed — show empty
+    setDetailPayload((prev) => prev ? { ...prev, pestsLoading: false } : prev);
   };
-  
-  const getSeverityLabel = (severity: string) => {
-    switch (severity) {
-      case 'critica': return 'Crítica';
-      case 'alta': return 'Alta';
-      case 'media': return 'Média';
-      case 'baixa': return 'Baixa';
-      default: return severity;
-    }
-  };
-  
-  // Usar dados do Supabase se online, senão usar dados locais
-  const scouts = useMemo(() => {
+
+  const scouts = useMemo((): ScoutDetail[] => {
     if (isOnline && supabaseScouts.length > 0) {
       return supabaseScouts.map(s => ({
         id: String(s.id),
-        latitude: 0,
-        longitude: 0,
+        latitude: s.latitude ?? 0,
+        longitude: s.longitude ?? 0,
         talhaoNome: s.talhaoNome || s.nome,
+        talhaoId: s.talhaoId,
+        talhaoArea: s.talhaoArea,
+        talhaoCulturaAtual: s.talhaoCulturaAtual,
+        talhaoCultura: s.talhaoCultura,
+        talhaoPercentualInfestacao: s.talhaoPercentualInfestacao,
         visitado: s.status === 'CONCLUIDO',
         dataVisita: undefined,
         pragasCount: s.totalPragas,
         observacoes: s.observacao,
         createdAt: s.createdAt,
-        updatedAt: s.createdAt,
         synced: true,
       }));
     }
-    return localScouts;
+    return localScouts.map((s): ScoutDetail => ({
+      id: s.id,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      talhaoNome: s.talhaoNome,
+      talhaoId: undefined,
+      talhaoArea: undefined,
+      talhaoCulturaAtual: undefined,
+      visitado: s.visitado,
+      dataVisita: s.dataVisita,
+      pragasCount: s.pragasCount,
+      observacoes: s.observacoes,
+      createdAt: s.createdAt,
+      synced: s.synced,
+    }));
   }, [isOnline, supabaseScouts, localScouts]);
 
-  const filteredScouts = scouts.filter((scout) => {
-    const matchesSearch = scout.talhaoNome?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                         `${scout.latitude}, ${scout.longitude}`.includes(searchQuery.toLowerCase()) ||
-                         false;
-    const matchesFilter = activeTab === 'todos' || 
-                         (activeTab === 'visitados' && scout.visitado) ||
-                         (activeTab === 'pendentes' && !scout.visitado);
-    return matchesSearch && matchesFilter;
-  });
+  // Group scouts by month -> talhão, compute trends
+  const sections = useMemo((): MonthSection[] => {
+    // Group by month
+    const byMonth = new Map<string, ScoutDetail[]>();
+    for (const s of scouts) {
+      const mk = getMonthKey(s.createdAt);
+      const arr = byMonth.get(mk) ?? [];
+      arr.push(s);
+      byMonth.set(mk, arr);
+    }
 
-  const totalPragas = scouts.reduce((sum, s) => sum + (s.pragasCount || 0), 0);
+    // Build per-month per-talhão pest totals for trend computation
+    const pestsByMonthTalhao = new Map<string, number>(); // "YYYY-MM|talhaoKey" -> totalPragas
+    for (const [mk, list] of byMonth.entries()) {
+      const byTalhao = new Map<string, number>();
+      for (const s of list) {
+        const tk = s.talhaoNome ?? s.id;
+        byTalhao.set(tk, (byTalhao.get(tk) ?? 0) + (s.pragasCount || 0));
+      }
+      for (const [tk, count] of byTalhao.entries()) {
+        pestsByMonthTalhao.set(`${mk}|${tk}`, count);
+      }
+    }
 
-  const tabs: { key: TabType; label: string; count: number }[] = [
-    { key: 'todos', label: 'Todos', count: scouts.length },
-    { key: 'visitados', label: 'Visitados', count: scouts.filter(s => s.visitado).length },
-    { key: 'pendentes', label: 'Pendentes', count: scouts.filter(s => !s.visitado).length },
-  ];
+    function prevMonthKey(mk: string): string {
+      const [y, m] = mk.split('-').map(Number);
+      const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+      return prev;
+    }
 
-  const handlePerfil = () => {
-    router.push('/(tabs)/perfil');
-  };
+    const sorted = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a));
+
+    return sorted.map((mk): MonthSection => {
+      const list = byMonth.get(mk)!;
+      const prevMk = prevMonthKey(mk);
+
+      // Group by talhão within this month
+      const byTalhao = new Map<string, { scouts: ScoutDetail[]; totalPragas: number }>();
+      for (const s of list) {
+        const tk = s.talhaoNome ?? s.id;
+        const cur = byTalhao.get(tk) ?? { scouts: [], totalPragas: 0 };
+        cur.scouts.push(s);
+        cur.totalPragas += s.pragasCount || 0;
+        byTalhao.set(tk, cur);
+      }
+
+      // Filter by search
+      const data: TalhaoMonth[] = Array.from(byTalhao.entries())
+        .filter(([tk]) => !searchQuery || tk.toLowerCase().includes(searchQuery.toLowerCase()))
+        .map(([tk, { scouts: tScouts, totalPragas }]): TalhaoMonth => {
+          const latest = tScouts.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+          const prevKey = `${prevMk}|${tk}`;
+          const prevPragas = pestsByMonthTalhao.get(prevKey);
+          const trend = prevPragas != null ? totalPragas - prevPragas : null;
+          return {
+            key: `${mk}-${tk}`,
+            talhaoNome: tk,
+            talhaoId: latest.talhaoId,
+            talhaoArea: latest.talhaoArea,
+            talhaoCulturaAtual: latest.talhaoCulturaAtual,
+            talhaoPercentualInfestacao: latest.talhaoPercentualInfestacao,
+            totalPragas,
+            scoutCount: tScouts.length,
+            latestScout: latest,
+            trend,
+          };
+        })
+        .sort((a, b) => b.totalPragas - a.totalPragas);
+
+      return {
+        title: formatMonthLabel(mk),
+        monthKey: mk,
+        data,
+      };
+    }).filter(s => s.data.length > 0);
+  }, [scouts, searchQuery]);
+
+  // Current month stats
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const currentMonthScouts = useMemo(() => scouts.filter(s => getMonthKey(s.createdAt) === currentMonthKey), [scouts, currentMonthKey]);
+  const totalPragasCurrentMonth = currentMonthScouts.reduce((sum, s) => sum + (s.pragasCount || 0), 0);
+
+  const handlePerfil = () => router.push('/(tabs)/perfil');
 
   const handleNovo = async () => {
     try {
-      // Capturar localização
       await captureLocation();
-      
       if (!location) {
         Alert.alert('Aguarde', 'Obtendo localização...');
         return;
       }
-
       open();
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Erro ao obter localização');
@@ -167,7 +317,6 @@ export default function MonitoramentoScreen() {
       Alert.alert('Erro', 'Localização não disponível');
       return;
     }
-
     try {
       setIsSubmitting(true);
       await create({
@@ -185,21 +334,39 @@ export default function MonitoramentoScreen() {
     }
   };
 
+  const renderTrendBadge = (trend: number | null) => {
+    if (trend == null) return null;
+    if (trend === 0) {
+      return (
+        <View style={[styles.trendBadge, { backgroundColor: '#6B728015' }]}>
+          <Icon name={MinusIcon} size={10} color="#6B7280" />
+          <Text style={[styles.trendText, { color: '#6B7280' }]}>Estável</Text>
+        </View>
+      );
+    }
+    const improved = trend < 0;
+    const color = improved ? '#10B981' : '#EF4444';
+    const bg = improved ? '#10B98115' : '#EF444415';
+    return (
+      <View style={[styles.trendBadge, { backgroundColor: bg }]}>
+        <Icon name={improved ? TrendingDown : TrendingUp} size={10} color={color} />
+        <Text style={[styles.trendText, { color }]}>
+          {improved ? `${Math.abs(trend)} menos` : `+${trend} pragas`}
+        </Text>
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor }]}>
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={[styles.headerTitle, { color: textColor }]}>Pragas</Text>
+          <Text style={[styles.headerTitle, { color: textColor }]}>Monitoramento</Text>
           <Text style={[styles.headerSubtitle, { color: mutedColor }]}>
-            {totalPragas} pragas em {scouts.length} pontos
+            {totalPragasCurrentMonth} pragas · {currentMonthScouts.length} pontos este mês
           </Text>
         </View>
-        <TouchableOpacity 
-          onPress={handlePerfil}
-          activeOpacity={0.7}
-          style={styles.avatarContainer}
-        >
+        <TouchableOpacity onPress={handlePerfil} activeOpacity={0.7} style={styles.avatarContainer}>
           <Image
             source={avatarUri ? { uri: avatarUri } : require('../../../assets/images/avatar.jpg')}
             style={styles.avatar}
@@ -208,32 +375,32 @@ export default function MonitoramentoScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Stats Cards */}
+      {/* Stats — current month */}
       <View style={styles.statsRow}>
         <View style={[styles.statCard, { backgroundColor: cardColor }]}>
           <View style={[styles.statIcon, { backgroundColor: palette.gold + '20' }]}>
             <Icon name={AlertTriangle} size={18} color={palette.gold} />
           </View>
-          <Text style={[styles.statValue, { color: textColor }]}>{totalPragas}</Text>
+          <Text style={[styles.statValue, { color: textColor }]}>{totalPragasCurrentMonth}</Text>
           <Text style={[styles.statLabel, { color: mutedColor }]}>Pragas</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: cardColor }]}>
           <View style={[styles.statIcon, { backgroundColor: '#10B981' + '20' }]}>
             <Icon name={Eye} size={18} color="#10B981" />
           </View>
-          <Text style={[styles.statValue, { color: textColor }]}>{scouts.filter(s => s.visitado).length}</Text>
+          <Text style={[styles.statValue, { color: textColor }]}>{currentMonthScouts.filter(s => s.visitado).length}</Text>
           <Text style={[styles.statLabel, { color: mutedColor }]}>Visitados</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: cardColor }]}>
           <View style={[styles.statIcon, { backgroundColor: '#F59E0B' + '20' }]}>
             <Icon name={EyeOff} size={18} color="#F59E0B" />
           </View>
-          <Text style={[styles.statValue, { color: textColor }]}>{scouts.filter(s => !s.visitado).length}</Text>
+          <Text style={[styles.statValue, { color: textColor }]}>{currentMonthScouts.filter(s => !s.visitado).length}</Text>
           <Text style={[styles.statLabel, { color: mutedColor }]}>Pendentes</Text>
         </View>
       </View>
 
-      {/* Search */}
+      {/* Search + Novo */}
       <View style={styles.searchSection}>
         <View style={[styles.searchContainer, { backgroundColor: cardColor, borderColor }]}>
           <Icon name={Search} size={18} color={mutedColor} />
@@ -245,134 +412,92 @@ export default function MonitoramentoScreen() {
             onChangeText={setSearchQuery}
           />
         </View>
+        <TouchableOpacity
+          style={[styles.addButton, { borderColor: primaryColor }]}
+          activeOpacity={0.7}
+          onPress={handleNovo}
+        >
+          <Icon name={Plus} size={16} color={primaryColor} />
+          <Text style={[styles.addButtonText, { color: primaryColor }]}>Novo</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabsContainer}>
-        <View style={[styles.tabsRow, { borderBottomColor: borderColor }]}>
-          <View style={styles.tabsList}>
-            {tabs.map((tab) => (
-              <TouchableOpacity
-                key={tab.key}
-                style={styles.tab}
-                onPress={() => setActiveTab(tab.key)}
-                activeOpacity={0.7}
-              >
-                <Text 
-                  style={[
-                    styles.tabLabel, 
-                    { color: activeTab === tab.key ? primaryColor : mutedColor }
-                  ]}
-                >
-                  {tab.label}
-                </Text>
-                <Text 
-                  style={[
-                    styles.tabCount, 
-                    { 
-                      color: activeTab === tab.key ? primaryColor : mutedColor,
-                      opacity: activeTab === tab.key ? 1 : 0.6
-                    }
-                  ]}
-                >
-                  {tab.count}
-                </Text>
-                {activeTab === tab.key && (
-                  <View style={[styles.tabIndicator, { backgroundColor: primaryColor }]} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity 
-            style={[styles.addButton, { borderColor: primaryColor }]}
-            activeOpacity={0.7}
-            onPress={handleNovo}
-          >
-            <Icon name={Plus} size={16} color={primaryColor} />
-            <Text style={[styles.addButtonText, { color: primaryColor }]}>Novo</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Lista */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+      {/* Monthly sections */}
+      <SectionList
+        sections={sections}
+        keyExtractor={(item) => item.key}
+        stickySectionHeadersEnabled={false}
+        contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredScouts.length === 0 ? (
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <View style={[styles.emptyIcon, { backgroundColor: cardColor }]}>
               <Icon name={Bug} size={32} color={mutedColor} />
             </View>
-            <Text style={[styles.emptyTitle, { color: textColor }]}>
-              Nenhum ponto encontrado
-            </Text>
+            <Text style={[styles.emptyTitle, { color: textColor }]}>Nenhum monitoramento</Text>
             <Text style={[styles.emptySubtitle, { color: mutedColor }]}>
               {searchQuery ? 'Tente buscar por outro termo' : 'Adicione um ponto de monitoramento'}
             </Text>
           </View>
-        ) : (
-          filteredScouts.map((scout) => (
-            <TouchableOpacity 
-              key={scout.id} 
-              style={[styles.scoutCard, { backgroundColor: cardColor }]}
-              activeOpacity={0.7}
-              onPress={() => handleScoutPress(scout as ScoutDetail)}
-            >
-              <View style={styles.scoutLeft}>
-                <View style={[
-                  styles.scoutIcon, 
-                  { backgroundColor: scout.visitado ? '#10B981' + '20' : '#F59E0B' + '20' }
-                ]}>
-                  <Icon 
-                    name={MapPin} 
-                    size={18} 
-                    color={scout.visitado ? '#10B981' : '#F59E0B'} 
-                  />
-                </View>
-                <View style={styles.scoutInfo}>
-                  <Text style={[styles.scoutName, { color: textColor }]}>
-                    {scout.talhaoNome || `Ponto ${scout.id.slice(-4)}`}
-                  </Text>
-                  <View style={styles.scoutMeta}>
-                    {scout.pragasCount > 0 && (
-                      <View style={styles.pragasBadge}>
-                        <Icon name={AlertTriangle} size={11} color={palette.gold} />
-                        <Text style={[styles.pragasText, { color: palette.gold }]}>
-                          {scout.pragasCount} praga{scout.pragasCount > 1 ? 's' : ''}
-                        </Text>
-                      </View>
-                    )}
-                    {scout.dataVisita && (
-                      <View style={styles.dateContainer}>
-                        <Icon name={Calendar} size={11} color={mutedColor} />
-                        <Text style={[styles.dateText, { color: mutedColor }]}>
-                          {new Date(scout.dataVisita).toLocaleDateString('pt-BR')}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </View>
-              <View style={styles.scoutRight}>
-                <View style={[
-                  styles.statusDot, 
-                  { backgroundColor: scout.visitado ? '#10B981' : '#F59E0B' }
-                ]} />
-                <Icon name={ChevronRight} size={18} color={mutedColor} />
-              </View>
-            </TouchableOpacity>
-          ))
+        }
+        renderSectionHeader={({ section }) => (
+          <View style={[styles.sectionHeader, { borderBottomColor: borderColor }]}>
+            <Icon name={Calendar} size={14} color={primaryColor} />
+            <Text style={[styles.sectionTitle, { color: textColor }]}>{section.title}</Text>
+            <Text style={[styles.sectionCount, { color: mutedColor }]}>
+              {section.data.length} talhão{section.data.length !== 1 ? 'ões' : ''}
+            </Text>
+          </View>
         )}
-      </ScrollView>
+        renderItem={({ item, section }) => (
+          <TouchableOpacity
+            style={[styles.talhaoCard, { backgroundColor: cardColor }]}
+            activeOpacity={0.7}
+            onPress={() => handleTalhaoPress(item, section.monthKey)}
+          >
+            <View style={styles.talhaoLeft}>
+              <View style={[styles.talhaoIcon, { backgroundColor: item.totalPragas > 0 ? '#F59E0B20' : '#10B98120' }]}>
+                <Icon name={MapPin} size={18} color={item.totalPragas > 0 ? '#F59E0B' : '#10B981'} />
+              </View>
+              <View style={styles.talhaoInfo}>
+                <Text style={[styles.talhaoName, { color: textColor }]} numberOfLines={1}>
+                  {item.talhaoNome}
+                </Text>
+                <View style={styles.talhaoMeta}>
+                  {(item.talhaoArea != null || item.talhaoCulturaAtual) && (
+                    <Text style={[styles.talhaoMetaText, { color: mutedColor }]} numberOfLines={1}>
+                      {[item.talhaoArea != null && `${Number(item.talhaoArea).toLocaleString('pt-BR')} ha`, item.talhaoCulturaAtual].filter(Boolean).join(' · ')}
+                    </Text>
+                  )}
+                  {item.totalPragas > 0 && (
+                    <View style={styles.pragasBadge}>
+                      <Icon name={AlertTriangle} size={11} color={palette.gold} />
+                      <Text style={[styles.pragasText, { color: palette.gold }]}>
+                        {item.totalPragas} praga{item.totalPragas > 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                  )}
+                  {item.talhaoPercentualInfestacao != null && item.talhaoPercentualInfestacao > 0 && (
+                    <Text style={[styles.talhaoMetaText, { color: '#F59E0B', fontWeight: '600' }]}>
+                      Infestação: {Number(item.talhaoPercentualInfestacao).toFixed(1)}%
+                    </Text>
+                  )}
+                  <Text style={[styles.talhaoMetaText, { color: mutedColor }]}>
+                    {item.scoutCount} scout{item.scoutCount > 1 ? 's' : ''}
+                  </Text>
+                </View>
+                {renderTrendBadge(item.trend)}
+              </View>
+            </View>
+            <View style={styles.talhaoRight}>
+              <View style={[styles.statusDot, { backgroundColor: item.latestScout.visitado ? '#10B981' : '#F59E0B' }]} />
+              <Icon name={ChevronRight} size={18} color={mutedColor} />
+            </View>
+          </TouchableOpacity>
+        )}
+      />
 
-      {/* Modal de Novo Scout */}
-      <BottomSheet
-        isVisible={isVisible}
-        onClose={close}
-        title="Novo Ponto de Monitoramento"
-      >
+      <BottomSheet isVisible={isVisible} onClose={close} title="Novo Ponto de Monitoramento">
         <View style={styles.formContainer}>
           {location && (
             <View style={[styles.locationCard, { backgroundColor: cardColor }]}>
@@ -390,24 +515,14 @@ export default function MonitoramentoScreen() {
               </View>
             </View>
           )}
-
           <View style={styles.formActions}>
-            <Button
-              variant="outline"
-              onPress={close}
-              style={styles.cancelButton}
-            >
+            <Button variant="outline" onPress={close} style={styles.cancelButton}>
               <Text>Cancelar</Text>
             </Button>
             <Button
               variant="default"
               onPress={handleSubmit}
-              style={[
-                styles.submitButton,
-                { 
-                  backgroundColor: palette.gold,
-                }
-              ]}
+              style={[styles.submitButton, { backgroundColor: palette.gold }]}
               disabled={isSubmitting || !location}
             >
               <Text style={{ color: '#000000', fontWeight: '600' }}>
@@ -418,209 +533,34 @@ export default function MonitoramentoScreen() {
         </View>
       </BottomSheet>
 
-      {/* Modal de Detalhes do Ponto */}
-      <BottomSheet
-        isVisible={isDetailVisible}
-        onClose={closeDetail}
-        title={selectedScout?.talhaoNome || `Ponto ${selectedScout?.id.slice(-6)}`}
-      >
-        {selectedScout && (
-          <View style={styles.detailContainer}>
-            {/* Status */}
-            <View style={[styles.detailStatusCard, { 
-              backgroundColor: selectedScout.visitado ? '#10B98115' : '#F59E0B15' 
-            }]}>
-              <Icon 
-                name={selectedScout.visitado ? CheckCircle : Clock} 
-                size={24} 
-                color={selectedScout.visitado ? '#10B981' : '#F59E0B'} 
-              />
-              <View style={styles.detailStatusInfo}>
-                <Text style={[styles.detailStatusLabel, { 
-                  color: selectedScout.visitado ? '#10B981' : '#F59E0B' 
-                }]}>
-                  {selectedScout.visitado ? 'Visitado' : 'Pendente'}
-                </Text>
-                {selectedScout.dataVisita && (
-                  <Text style={[styles.detailStatusDate, { color: mutedColor }]}>
-                    {new Date(selectedScout.dataVisita).toLocaleDateString('pt-BR', {
-                      day: '2-digit',
-                      month: 'long',
-                      year: 'numeric'
-                    })}
-                  </Text>
-                )}
-              </View>
-            </View>
-
-            {/* Localização */}
-            <View style={[styles.detailSection, { borderColor }]}>
-              <View style={styles.detailSectionHeader}>
-                <Icon name={Navigation} size={16} color={primaryColor} />
-                <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                  Localização
-                </Text>
-              </View>
-              <View style={styles.detailCoords}>
-                <View style={styles.detailCoordRow}>
-                  <Text style={[styles.detailCoordLabel, { color: mutedColor }]}>Latitude</Text>
-                  <Text style={[styles.detailCoordValue, { color: textColor }]}>
-                    {selectedScout.latitude.toFixed(6)}
-                  </Text>
-                </View>
-                <View style={styles.detailCoordRow}>
-                  <Text style={[styles.detailCoordLabel, { color: mutedColor }]}>Longitude</Text>
-                  <Text style={[styles.detailCoordValue, { color: textColor }]}>
-                    {selectedScout.longitude.toFixed(6)}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Pragas */}
-            <View style={[styles.detailSection, { borderColor }]}>
-              <View style={styles.detailSectionHeader}>
-                <Icon name={Bug} size={16} color={palette.gold} />
-                <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                  Pragas Identificadas
-                </Text>
-                {scoutPests.length > 0 && (
-                  <View style={[styles.pestCountBadge, { backgroundColor: palette.gold + '20' }]}>
-                    <Text style={[styles.pestCountText, { color: palette.gold }]}>
-                      {scoutPests.length}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              
-              {pestsLoading ? (
-                <View style={styles.loadingPests}>
-                  <Text style={[styles.loadingText, { color: mutedColor }]}>
-                    Carregando pragas...
-                  </Text>
-                </View>
-              ) : scoutPests.length > 0 ? (
-                <View style={styles.pestsList}>
-                  {scoutPests.map((pest) => (
-                    <View 
-                      key={pest.id} 
-                      style={[styles.pestCard, { backgroundColor: cardColor, borderColor }]}
-                    >
-                      <View style={styles.pestHeader}>
-                        <View style={styles.pestNameRow}>
-                          <Text style={[styles.pestName, { color: textColor }]}>
-                            {pest.pragaNome || 'Desconhecida'}
-                          </Text>
-                          <View style={[
-                            styles.severityBadge, 
-                            { backgroundColor: getSeverityColor((pest.prioridade || 'baixa').toLowerCase()) + '20' }
-                          ]}>
-                            <Text style={[
-                              styles.severityText, 
-                              { color: getSeverityColor((pest.prioridade || 'baixa').toLowerCase()) }
-                            ]}>
-                              {getSeverityLabel((pest.prioridade || 'baixa').toLowerCase())}
-                            </Text>
-                          </View>
-                        </View>
-                        {pest.pragaNomeCientifico && (
-                          <Text style={[styles.pestScientificName, { color: mutedColor }]}>
-                            {pest.pragaNomeCientifico}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={styles.pestDetails}>
-                        <View style={styles.pestDetailItem}>
-                          <Text style={[styles.pestDetailLabel, { color: mutedColor }]}>
-                            Quantidade
-                          </Text>
-                          <Text style={[styles.pestDetailValue, { color: textColor }]}>
-                            {pest.contagem || 0} {(pest.contagem || 0) === 1 ? 'indivíduo' : 'indivíduos'}
-                          </Text>
-                        </View>
-                        {pest.tipoPraga && (
-                          <View style={styles.pestDetailItem}>
-                            <Text style={[styles.pestDetailLabel, { color: mutedColor }]}>
-                              Tipo
-                            </Text>
-                            <Text style={[styles.pestDetailValue, { color: textColor }]}>
-                              {pest.tipoPraga}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      {pest.observacao && (
-                        <Text style={[styles.pestNotes, { color: mutedColor }]}>
-                          {pest.observacao}
-                        </Text>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <View style={[styles.noPragasCard, { backgroundColor: '#10B98115' }]}>
-                  <Icon name={CheckCircle} size={18} color="#10B981" />
-                  <Text style={[styles.noPragasText, { color: '#10B981' }]}>
-                    Nenhuma praga identificada
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Observações */}
-            {selectedScout.observacoes && (
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={AlertTriangle} size={16} color={mutedColor} />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Observações
-                  </Text>
-                </View>
-                <Text style={[styles.detailObservations, { color: textColor }]}>
-                  {selectedScout.observacoes}
-                </Text>
-              </View>
-            )}
-
-            {/* Sync status */}
-            <View style={styles.detailSyncRow}>
-              <View style={[
-                styles.syncBadge, 
-                { backgroundColor: selectedScout.synced ? '#10B98120' : '#F59E0B20' }
-              ]}>
-                <View style={[
-                  styles.syncDot,
-                  { backgroundColor: selectedScout.synced ? '#10B981' : '#F59E0B' }
-                ]} />
-                <Text style={[styles.syncText, { 
-                  color: selectedScout.synced ? '#10B981' : '#F59E0B' 
-                }]}>
-                  {selectedScout.synced ? 'Sincronizado' : 'Aguardando sincronização'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Ações */}
-            <View style={styles.detailActions}>
-              <Button
-                variant="outline"
-                onPress={closeDetail}
-                style={styles.detailCloseButton}
-              >
-                <Text>Fechar</Text>
-              </Button>
-            </View>
-          </View>
-        )}
-      </BottomSheet>
+      {detailPayload != null && (
+        <BottomSheet
+          isVisible={detailSheetVisible}
+          onClose={() => setDetailSheetVisible(false)}
+          title={detailPayload.title}
+        >
+          <MonitoramentoDetailSheet
+            talhaoArea={detailPayload.talhaoArea}
+            talhaoCulturaAtual={detailPayload.talhaoCulturaAtual}
+            percentualInfestacao={detailPayload.percentualInfestacao}
+            latitude={detailPayload.latitude}
+            longitude={detailPayload.longitude}
+            visitado={detailPayload.visitado}
+            dataVisita={detailPayload.dataVisita}
+            pragas={detailPayload.pragas}
+            pestsLoading={detailPayload.pestsLoading}
+            observacoes={detailPayload.observacoes}
+            synced={detailPayload.synced}
+            onClose={() => setDetailSheetVisible(false)}
+          />
+        </BottomSheet>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -629,43 +569,16 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 20,
   },
-  headerLeft: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    marginTop: 4,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    gap: 4,
-  },
-  addButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  avatarContainer: {
-    position: 'relative',
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
+  headerLeft: { flex: 1 },
+  headerTitle: { fontSize: 28, fontWeight: '700' },
+  headerSubtitle: { fontSize: 14, marginTop: 4 },
+  avatarContainer: { position: 'relative' },
+  avatar: { width: 44, height: 44, borderRadius: 22 },
   statsRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   statCard: {
     flex: 1,
@@ -681,19 +594,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  statLabel: {
-    fontSize: 11,
-    marginTop: 2,
-  },
+  statValue: { fontSize: 20, fontWeight: '700' },
+  statLabel: { fontSize: 11, marginTop: 2 },
   searchSection: {
+    flexDirection: 'row',
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
+    gap: 10,
+    alignItems: 'center',
   },
   searchContainer: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
@@ -702,54 +613,82 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 10,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
+  searchInput: { flex: 1, fontSize: 15 },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 4,
   },
-  tabsContainer: {
-    paddingHorizontal: 16,
+  addButtonText: { fontSize: 13, fontWeight: '600' },
+  listContent: { paddingHorizontal: 16, paddingBottom: 24 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginBottom: 8,
+    marginTop: 8,
   },
-  tabsRow: {
+  sectionTitle: { fontSize: 15, fontWeight: '700', flex: 1 },
+  sectionCount: { fontSize: 12, fontWeight: '500' },
+  talhaoCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderBottomWidth: 1,
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
   },
-  tabsList: {
+  talhaoLeft: {
     flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
   },
-  tab: {
-    paddingVertical: 12,
-    marginRight: 16,
-    position: 'relative',
+  talhaoIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  talhaoInfo: { flex: 1 },
+  talhaoName: { fontSize: 15, fontWeight: '600', marginBottom: 4 },
+  talhaoMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  talhaoMetaText: { fontSize: 12 },
+  pragasBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  tabLabel: {
-    fontSize: 14,
-    fontWeight: '500',
+  pragasText: { fontSize: 12, fontWeight: '600' },
+  talhaoRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  tabCount: {
-    fontSize: 12,
-    fontWeight: '600',
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  trendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
-  tabIndicator: {
-    position: 'absolute',
-    bottom: -1,
-    left: 0,
-    right: 0,
-    height: 2,
-    borderRadius: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
+  trendText: { fontSize: 10, fontWeight: '600' },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -763,78 +702,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 16,
   },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-  },
-  scoutCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 10,
-  },
-  scoutLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 12,
-  },
-  scoutIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scoutInfo: {
-    flex: 1,
-  },
-  scoutName: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  scoutMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  pragasBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  pragasText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dateContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  dateText: {
-    fontSize: 12,
-  },
-  scoutRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  formContainer: {
-    gap: 20,
-  },
+  emptyTitle: { fontSize: 17, fontWeight: '600', marginBottom: 6 },
+  emptySubtitle: { fontSize: 14 },
+  formContainer: { gap: 20 },
   locationCard: {
     flexDirection: 'row',
     padding: 16,
@@ -842,211 +712,11 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'flex-start',
   },
-  locationInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  locationLabel: {
-    fontSize: 12,
-  },
-  locationCoords: {
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'monospace',
-  },
-  locationAccuracy: {
-    fontSize: 11,
-  },
-  formActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  cancelButton: {
-    flex: 1,
-  },
-  submitButton: {
-    flex: 1,
-  },
-  // Estilos do Modal de Detalhes
-  detailContainer: {
-    gap: 16,
-  },
-  detailStatusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
-  },
-  detailStatusInfo: {
-    flex: 1,
-  },
-  detailStatusLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  detailStatusDate: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-  detailSection: {
-    borderTopWidth: 1,
-    paddingTop: 16,
-  },
-  detailSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  detailSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailCoords: {
-    gap: 8,
-  },
-  detailCoordRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  detailCoordLabel: {
-    fontSize: 13,
-  },
-  detailCoordValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'monospace',
-  },
-  pragasCountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 10,
-    gap: 10,
-  },
-  pragasCountNumber: {
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  pragasCountLabel: {
-    fontSize: 13,
-  },
-  noPragasCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 10,
-    gap: 10,
-  },
-  noPragasText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailObservations: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  detailSyncRow: {
-    alignItems: 'flex-start',
-    marginTop: 4,
-  },
-  syncBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-  },
-  syncDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  syncText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  detailActions: {
-    marginTop: 8,
-  },
-  detailCloseButton: {
-    width: '100%',
-  },
-  // Estilos de Pragas
-  pestCountBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 'auto',
-  },
-  pestCountText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  loadingPests: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 13,
-  },
-  pestsList: {
-    gap: 10,
-  },
-  pestCard: {
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  pestHeader: {
-    marginBottom: 8,
-  },
-  pestNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  pestName: {
-    fontSize: 15,
-    fontWeight: '600',
-    flex: 1,
-  },
-  pestScientificName: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  severityBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  severityText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  pestDetails: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  pestDetailItem: {
-    gap: 2,
-  },
-  pestDetailLabel: {
-    fontSize: 11,
-  },
-  pestDetailValue: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  pestNotes: {
-    fontSize: 12,
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
+  locationInfo: { flex: 1, gap: 4 },
+  locationLabel: { fontSize: 12 },
+  locationCoords: { fontSize: 14, fontWeight: '600', fontFamily: 'monospace' },
+  locationAccuracy: { fontSize: 11 },
+  formActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  cancelButton: { flex: 1 },
+  submitButton: { flex: 1 },
 });
