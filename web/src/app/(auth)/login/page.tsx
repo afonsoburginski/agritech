@@ -43,9 +43,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 relative h-20 w-20 rounded-full overflow-hidden bg-primary/10 flex items-center justify-center">
-            <Image src="/images/logo.png" alt="AGROV" fill className="object-contain p-2" sizes="80px" priority />
+            <Image src="/images/logo.png" alt="Fox Fieldcore" fill className="object-contain p-2" sizes="80px" priority />
           </div>
-          <CardTitle className="text-2xl font-bold">AGROV ERP</CardTitle>
+          <CardTitle className="text-2xl font-bold">Fox Fieldcore</CardTitle>
           <CardDescription>
             Sistema de Gerenciamento Agrícola
           </CardDescription>

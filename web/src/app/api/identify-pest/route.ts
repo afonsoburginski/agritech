@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   return NextResponse.json({
-    service: 'AGROV Pest Identification API',
+    service: 'Fox Fieldcore Pest Identification API',
     version: '1.0.0',
     endpoints: {
       'POST /api/identify-pest': {

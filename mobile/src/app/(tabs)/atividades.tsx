@@ -1,18 +1,21 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { Image } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { AppHeader } from '@/components/app-header';
 import { BottomSheet, useBottomSheet } from '@/components/ui/bottom-sheet-simple';
+import { TaskDetailSheet, type AtividadeDetalhes } from '@/components/task-detail-sheet';
 import { useAtividades } from '@/hooks/use-atividades';
-import { useSupabaseActivities, useSupabasePlots, useScoutsByPlot, fetchTalhaoMonitoramentoDetail, type AtividadeTipo } from '@/hooks/use-supabase-data';
+import { useSupabaseActivities, useSupabasePlots, type AtividadeTipo } from '@/hooks/use-supabase-data';
 import { useColor } from '@/hooks/useColor';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
-import { useAvatarUri, useAppStore } from '@/stores/app-store';
+import { useAppStore } from '@/stores/app-store';
+import { useEffectiveAvatarUri } from '@/stores/auth-store';
 import { useAuthFazendaPadrao } from '@/stores/auth-store';
 import { supabase, isSupabaseConfigured } from '@/services/supabase';
 import { logger } from '@/services/logger';
@@ -24,34 +27,16 @@ import {
   CheckCircle2,
   MoreVertical,
   MapPin,
-  Edit3,
-  Trash2,
   X,
-  Clock,
-  Layers,
   AlertCircle,
-  FlaskConical
 } from 'lucide-react-native';
-
-interface AtividadeDetalhes {
-  id: string | number;
-  nome: string;
-  descricao?: string;
-  tipo: AtividadeTipo;
-  status: string;
-  plotId?: string;
-  talhaoNome?: string;
-  dataInicio?: string;
-  createdAt: string;
-  synced: boolean;
-}
 
 type TabType = 'todas' | 'pendentes' | 'concluidas';
 
 export default function AtividadesScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const avatarUri = useAvatarUri();
+  const avatarUri = useEffectiveAvatarUri();
   const backgroundColor = useColor({}, 'background');
   const cardColor = useColor({}, 'card');
   const textColor = useColor({}, 'text');
@@ -60,7 +45,14 @@ export default function AtividadesScreen() {
   const primaryColor = useColor({}, 'primary');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('todas');
-  
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const sheetAccent = isDark ? '#fff' : palette.darkGreen;
+  const sheetConfirmStyle = isDark
+    ? { backgroundColor: 'rgba(255,255,255,0.2)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' }
+    : { backgroundColor: palette.darkGreen + '20', borderWidth: 1, borderColor: palette.darkGreen };
+  const sheetConfirmTextColor = isDark ? '#fff' : palette.darkGreen;
+
   // Hooks
   const { isOnline } = useAppStore();
   const fazenda = useAuthFazendaPadrao();
@@ -85,14 +77,8 @@ export default function AtividadesScreen() {
   
   // Estado para formulário de criação
   const [formPlotId, setFormPlotId] = useState<number | string | null>(null);
+  const [formPrioridade, setFormPrioridade] = useState<'BAIXA' | 'MEDIA' | 'ALTA' | 'CRITICA'>('MEDIA');
 
-  // Recomendações Embrapa do talhão vinculado à tarefa (para exibir no detalhe)
-  const [talhaoRecomendacoes, setTalhaoRecomendacoes] = useState<Array<{ pragaNome: string; recomendacao?: string }>>([]);
-  const [loadingTalhaoRecomendacoes, setLoadingTalhaoRecomendacoes] = useState(false);
-  
-  // Buscar scouts do talhão da tarefa selecionada
-  const { scouts: taskScouts, isLoading: scoutsLoading } = useScoutsByPlot(selectedTask?.plotId);
-  
   // Usar dados do Supabase se online, senão usar dados locais
   const atividades = useMemo(() => {
     if (isOnline && supabaseActivities.length > 0) {
@@ -103,6 +89,7 @@ export default function AtividadesScreen() {
           nome: a.titulo,
           descricao: a.descricao,
           tipo: a.tipo || 'OUTROS',
+          prioridade: a.prioridade,
           status: (a.situacao || 'PENDENTE').toLowerCase(),
           plotId: firstTalhaoId != null ? String(firstTalhaoId) : undefined,
           talhaoNome: firstTalhaoId != null ? plots.find(p => p.id === firstTalhaoId)?.nome : undefined,
@@ -125,41 +112,6 @@ export default function AtividadesScreen() {
     }
   }, [params.openForm, open, router]);
 
-  // Buscar pragas com recomendações Embrapa do talhão quando abrir o detalhe da tarefa
-  useEffect(() => {
-    if (!isDetailVisible || !selectedTask?.plotId) {
-      setTalhaoRecomendacoes([]);
-      return;
-    }
-    const talhaoId = Number(selectedTask.plotId);
-    if (!Number.isFinite(talhaoId)) return;
-
-    let cancelled = false;
-    setLoadingTalhaoRecomendacoes(true);
-    fetchTalhaoMonitoramentoDetail(talhaoId, selectedTask.talhaoNome ?? 'Talhão', undefined, undefined)
-      .then((payload) => {
-        if (cancelled || !payload?.pragas) return;
-        const withRec = payload.pragas.filter(
-          (p) => p.recomendacao && p.recomendacao.trim() !== ''
-        );
-        setTalhaoRecomendacoes(
-          withRec.map((p) => ({
-            pragaNome: p.pragaNome,
-            recomendacao: p.recomendacao,
-          }))
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setTalhaoRecomendacoes([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingTalhaoRecomendacoes(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isDetailVisible, selectedTask?.plotId, selectedTask?.talhaoNome]);
-  
   // Form state
   const [formNome, setFormNome] = useState('');
   const [formDescricao, setFormDescricao] = useState('');
@@ -172,6 +124,7 @@ export default function AtividadesScreen() {
     setFormDescricao('');
     setFormTipo('OUTROS');
     setFormPlotId(null);
+    setFormPrioridade('MEDIA');
     open();
   };
   
@@ -322,17 +275,6 @@ export default function AtividadesScreen() {
     );
   };
   
-  // Cor por severidade
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'baixa': return '#10B981';
-      case 'media': return '#F59E0B';
-      case 'alta': return '#F97316';
-      case 'critica': return '#EF4444';
-      default: return mutedColor;
-    }
-  };
-  
   // Toggle rápido de status (pelo checkbox)
   const handleQuickToggle = async (task: AtividadeDetalhes) => {
     try {
@@ -376,7 +318,7 @@ export default function AtividadesScreen() {
             descricao: formDescricao.trim() || null,
             tipo: formTipo,
             situacao: 'PENDENTE' as const,
-            prioridade: 'MEDIA' as const,
+            prioridade: formPrioridade,
             talhao_ids: formPlotId != null ? [Number(formPlotId)] : [],
           });
         
@@ -396,6 +338,7 @@ export default function AtividadesScreen() {
       setFormNome('');
       setFormDescricao('');
       setFormPlotId(null);
+      setFormPrioridade('MEDIA');
       Alert.alert('Sucesso', 'Atividade criada com sucesso!');
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Erro ao criar atividade');
@@ -429,31 +372,58 @@ export default function AtividadesScreen() {
     { value: 'OUTROS', label: 'Outros' },
   ];
 
+  const prioridades: { value: 'BAIXA' | 'MEDIA' | 'ALTA' | 'CRITICA'; label: string }[] = [
+    { value: 'BAIXA', label: 'Baixa' },
+    { value: 'MEDIA', label: 'Média' },
+    { value: 'ALTA', label: 'Alta' },
+    { value: 'CRITICA', label: 'Crítica' },
+  ];
+
+  const getPrioridadeColor = (p: string) => {
+    switch ((p || '').toUpperCase()) {
+      case 'CRITICA': return '#DC2626';
+      case 'ALTA': return '#EA580C';
+      case 'MEDIA': return '#F59E0B';
+      case 'BAIXA': return '#10B981';
+      default: return mutedColor;
+    }
+  };
+  const getPrioridadeBg = (p: string) => {
+    const c = getPrioridadeColor(p);
+    return (c === mutedColor ? '#6B7280' : c) + '20';
+  };
+
   const handlePerfil = () => {
     router.push('/(tabs)/perfil');
   };
 
+  const pendentesCount = atividades.filter((a) => a.status === 'pendente').length;
+  const concluidasCount = atividades.filter((a) => a.status === 'concluida').length;
+
   return (
     <View style={[styles.container, { backgroundColor }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.headerTitle, { color: textColor }]}>Tarefas</Text>
-          <Text style={[styles.headerSubtitle, { color: mutedColor }]}>
-            {atividades.length} atividades registradas
+      <AppHeader
+        title="Tarefas"
+        avatarUri={avatarUri}
+        onAvatarPress={handlePerfil}
+        isOnline={isOnline}
+        showDuvidasButton
+      >
+        <Text style={styles.headerDescription}>
+          Crie e acompanhe as atividades da fazenda: monitoramento, aplicações e tarefas do dia a dia.
+        </Text>
+      </AppHeader>
+
+      <View style={[styles.summaryCard, { backgroundColor: cardColor, borderColor }]}>
+        <View style={[styles.summaryCardIcon, { backgroundColor: primaryColor + '20' }]}>
+          <Icon name={ClipboardList} size={20} color={primaryColor} />
+        </View>
+        <View style={styles.summaryCardContent}>
+          <Text style={[styles.summaryCardTitle, { color: textColor }]}>Resumo</Text>
+          <Text style={[styles.summaryCardText, { color: mutedColor }]}>
+            {pendentesCount} pendente{pendentesCount !== 1 ? 's' : ''} · {concluidasCount} concluída{concluidasCount !== 1 ? 's' : ''}
           </Text>
         </View>
-        <TouchableOpacity 
-          onPress={handlePerfil}
-          activeOpacity={0.7}
-          style={styles.avatarContainer}
-        >
-          <Image
-            source={avatarUri ? { uri: avatarUri } : require('../../../assets/images/avatar.jpg')}
-            style={styles.avatar}
-            resizeMode="cover"
-          />
-        </TouchableOpacity>
       </View>
 
       {/* Search */}
@@ -590,6 +560,13 @@ export default function AtividadesScreen() {
                         {tipos.find(t => t.value === atividade.tipo)?.label || atividade.tipo}
                       </Text>
                     </View>
+                    {'prioridade' in atividade && atividade.prioridade && (
+                      <View style={[styles.prioridadeBadge, { backgroundColor: getPrioridadeBg(atividade.prioridade) }]}>
+                        <Text style={[styles.prioridadeText, { color: getPrioridadeColor(atividade.prioridade) }]}>
+                          {prioridades.find(p => p.value === atividade.prioridade)?.label || atividade.prioridade}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </View>
@@ -656,8 +633,8 @@ export default function AtividadesScreen() {
                   style={[
                     styles.tipoButton,
                     {
-                      backgroundColor: formTipo === tipo.value ? palette.gold : cardColor,
-                      borderColor: formTipo === tipo.value ? palette.gold : borderColor,
+                      backgroundColor: formTipo === tipo.value ? sheetAccent : cardColor,
+                      borderColor: formTipo === tipo.value ? sheetAccent : borderColor,
                     },
                   ]}
                   onPress={() => setFormTipo(tipo.value)}
@@ -668,13 +645,53 @@ export default function AtividadesScreen() {
                       styles.tipoButtonText,
                       { 
                         color: formTipo === tipo.value 
-                          ? '#000000' 
+                          ? (isDark ? '#000' : '#fff') 
                           : textColor,
                         fontWeight: formTipo === tipo.value ? '600' : '400',
                       },
                     ]}
                   >
                     {tipo.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
+          <View style={styles.formField}>
+            <View style={styles.labelContainer}>
+              <Icon name={AlertCircle} size={16} color={mutedColor} />
+              <Text style={[styles.label, { color: textColor }]}>Prioridade</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.tipoContainer}
+              contentContainerStyle={styles.tipoContent}
+            >
+              {prioridades.map((p) => (
+                <TouchableOpacity
+                  key={p.value}
+                  style={[
+                    styles.tipoButton,
+                    {
+                      backgroundColor: formPrioridade === p.value ? sheetAccent : cardColor,
+                      borderColor: formPrioridade === p.value ? sheetAccent : borderColor,
+                    },
+                  ]}
+                  onPress={() => setFormPrioridade(p.value)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.tipoButtonText,
+                      {
+                        color: formPrioridade === p.value ? (isDark ? '#000' : '#fff') : textColor,
+                        fontWeight: formPrioridade === p.value ? '600' : '400',
+                      },
+                    ]}
+                  >
+                    {p.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -730,332 +747,41 @@ export default function AtividadesScreen() {
           </View>
 
           <View style={styles.formActions}>
-            <Button
-              variant="outline"
+            <TouchableOpacity
+              style={[styles.sheetCancelBtn, { borderColor: sheetAccent }]}
               onPress={close}
-              style={[styles.cancelButton, { flex: 1 }]}
+              activeOpacity={0.7}
             >
-              Cancelar
-            </Button>
-            <Button
-              variant="default"
-              onPress={handleSubmit}
+              <Text style={[styles.sheetCancelText, { color: sheetAccent }]}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[
-                styles.submitButton, 
-                { 
-                  flex: 1,
-                  backgroundColor: palette.gold,
-                }
+                styles.sheetConfirmBtn,
+                sheetConfirmStyle,
+                (!formNome.trim() || !formPlotId || isSubmitting) && { opacity: 0.5 },
               ]}
+              onPress={handleSubmit}
+              activeOpacity={0.7}
               disabled={isSubmitting || !formNome.trim() || !formPlotId}
             >
-              <Text style={{ color: '#000000', fontWeight: '600' }}>
+              <Text style={[styles.sheetConfirmText, { color: sheetConfirmTextColor }]}>
                 {isSubmitting ? 'Salvando...' : 'Criar Tarefa'}
               </Text>
-            </Button>
+            </TouchableOpacity>
           </View>
         </View>
       </BottomSheet>
 
-      {/* Modal de Detalhes da Tarefa */}
-      <BottomSheet
+      <TaskDetailSheet
         isVisible={isDetailVisible}
         onClose={() => { closeDetail(); setSelectedTask(null); }}
-        title={selectedTask?.nome ?? 'Detalhes da Tarefa'}
-      >
-        {selectedTask && (
-          <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
-            <View style={styles.detailContainer}>
-              {/* Status da Tarefa */}
-              <View style={[styles.detailStatusCard, { 
-                backgroundColor: selectedTask.status === 'concluida' ? '#10B98115' : 
-                                selectedTask.status === 'em_andamento' ? '#F59E0B15' : primaryColor + '15'
-              }]}>
-                <Icon 
-                  name={selectedTask.status === 'concluida' ? CheckCircle2 : Clock} 
-                  size={24} 
-                  color={selectedTask.status === 'concluida' ? '#10B981' : 
-                         selectedTask.status === 'em_andamento' ? '#F59E0B' : primaryColor} 
-                />
-                <View style={styles.detailStatusInfo}>
-                  <Text style={[styles.detailStatusLabel, { 
-                    color: selectedTask.status === 'concluida' ? '#10B981' : 
-                           selectedTask.status === 'em_andamento' ? '#F59E0B' : primaryColor 
-                  }]}>
-                    {selectedTask.status === 'concluida' ? 'Concluída' : 
-                     selectedTask.status === 'em_andamento' ? 'Em Andamento' : 'Pendente'}
-                  </Text>
-                  <Text style={[styles.detailStatusDate, { color: mutedColor }]}>
-                    Criada em {new Date(selectedTask.createdAt).toLocaleDateString('pt-BR', {
-                      day: '2-digit',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Descrição */}
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={ClipboardList} size={16} color={primaryColor} />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Descrição
-                  </Text>
-                </View>
-                {selectedTask.descricao ? (
-                  <Text style={[styles.detailSectionContent, { color: textColor }]}>
-                    {selectedTask.descricao}
-                  </Text>
-                ) : (
-                  <Text style={[styles.detailSectionContent, { color: mutedColor }]}>
-                    Nenhuma descrição informada
-                  </Text>
-                )}
-              </View>
-
-              {/* Tipo de Atividade */}
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={CheckCircle2} size={16} color={palette.gold} />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Tipo de Atividade
-                  </Text>
-                </View>
-                <Text style={[styles.detailSectionContent, { color: textColor }]}>
-                  {tipos.find(t => t.value === selectedTask.tipo)?.label || selectedTask.tipo}
-                </Text>
-              </View>
-
-              {/* Talhão */}
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={MapPin} size={16} color={primaryColor} />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Talhão
-                  </Text>
-                </View>
-                <Text style={[styles.detailSectionContent, { color: textColor }]}>
-                  {selectedTask.talhaoNome || 'Não definido'}
-                </Text>
-              </View>
-
-              {/* Datas */}
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={Calendar} size={16} color={mutedColor} />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Datas
-                  </Text>
-                </View>
-                <View style={styles.detailDatesList}>
-                  <View style={styles.detailDateRow}>
-                    <Text style={[styles.detailDateLabel, { color: mutedColor }]}>Criada em</Text>
-                    <Text style={[styles.detailDateValue, { color: textColor }]}>
-                      {new Date(selectedTask.createdAt).toLocaleDateString('pt-BR', {
-                        day: '2-digit',
-                        month: 'short',
-                        year: 'numeric',
-                      })}
-                    </Text>
-                  </View>
-                  {selectedTask.dataInicio && (
-                    <View style={styles.detailDateRow}>
-                      <Text style={[styles.detailDateLabel, { color: mutedColor }]}>Início previsto</Text>
-                      <Text style={[styles.detailDateValue, { color: textColor }]}>
-                        {new Date(selectedTask.dataInicio).toLocaleDateString('pt-BR', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-            {/* Scouts do talhão vinculado à atividade (atividade é por talhão, não por scout) */}
-            {selectedTask.plotId && (
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={Layers} size={16} color={primaryColor} />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Pontos de monitoramento (deste talhão)
-                  </Text>
-                  {!scoutsLoading && (
-                    <Text style={[styles.detailSectionCount, { color: mutedColor }]}>
-                      {taskScouts.length} ponto{taskScouts.length !== 1 ? 's' : ''}
-                    </Text>
-                  )}
-                </View>
-                
-                {scoutsLoading ? (
-                  <ActivityIndicator size="small" color={primaryColor} style={{ marginVertical: 16 }} />
-                ) : taskScouts.length === 0 ? (
-                  <Text style={[styles.noScoutsText, { color: mutedColor }]}>
-                    Nenhum ponto de monitoramento neste talhão
-                  </Text>
-                ) : (
-                  <ScrollView 
-                    horizontal 
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.scoutsScroll}
-                  >
-                    {taskScouts.map((scout) => (
-                      <View 
-                        key={scout.id} 
-                        style={[styles.scoutCard, { backgroundColor: cardColor }]}
-                      >
-                        <View style={styles.scoutCardHeader}>
-                          <View style={[
-                            styles.scoutStatusDot, 
-                            { backgroundColor: scout.status === 'CONCLUIDO' ? '#10B981' : '#F59E0B' }
-                          ]} />
-                          <Text style={[styles.scoutCardTitle, { color: textColor }]}>
-                            {scout.nome}
-                          </Text>
-                        </View>
-                        
-                        <View style={styles.scoutCardRow}>
-                          <Icon name={Calendar} size={12} color={mutedColor} />
-                          <Text style={[styles.scoutCardText, { color: mutedColor }]}>
-                            {new Date(scout.createdAt).toLocaleDateString('pt-BR')}
-                          </Text>
-                        </View>
-                        
-                        {scout.pests.length > 0 ? (
-                          <View style={styles.scoutPestsList}>
-                            <Text style={[styles.scoutPestsTitle, { color: '#EF4444' }]}>
-                              {scout.pests.length} praga{scout.pests.length > 1 ? 's' : ''}:
-                            </Text>
-                            {scout.pests.slice(0, 3).map((pest) => (
-                              <View key={pest.id} style={styles.scoutPestItem}>
-                                <View style={[
-                                  styles.severityDot, 
-                                  { backgroundColor: getSeverityColor(pest.prioridade || 'BAIXA') }
-                                ]} />
-                                <Text 
-                                  style={[styles.scoutPestName, { color: textColor }]}
-                                  numberOfLines={1}
-                                >
-                                  {pest.pragaNome || 'Desconhecida'}
-                                </Text>
-                                <Text style={[styles.scoutPestQty, { color: mutedColor }]}>
-                                  ({pest.contagem || 0})
-                                </Text>
-                              </View>
-                            ))}
-                            {scout.pests.length > 3 && (
-                              <Text style={[styles.morePests, { color: mutedColor }]}>
-                                +{scout.pests.length - 3} mais...
-                              </Text>
-                            )}
-                          </View>
-                        ) : (
-                          <Text style={[styles.noPestsText, { color: '#10B981' }]}>
-                            Sem pragas identificadas
-                          </Text>
-                        )}
-                      </View>
-                    ))}
-                  </ScrollView>
-                )}
-              </View>
-            )}
-
-            {/* Recomendações para o talhão desta tarefa */}
-            {selectedTask.plotId && (
-              <View style={[styles.detailSection, { borderColor }]}>
-                <View style={styles.detailSectionHeader}>
-                  <Icon name={FlaskConical} size={16} color="#16A34A" />
-                  <Text style={[styles.detailSectionTitle, { color: textColor }]}>
-                    Recomendações (este talhão)
-                  </Text>
-                </View>
-                {loadingTalhaoRecomendacoes ? (
-                  <ActivityIndicator size="small" color="#16A34A" style={{ marginVertical: 12 }} />
-                ) : talhaoRecomendacoes.length === 0 ? (
-                  <Text style={[styles.embrapaEmptyText, { color: mutedColor }]}>
-                    Nenhuma recomendação registrada para as pragas deste talhão. Faça um monitoramento com identificação por IA para gerar recomendações.
-                  </Text>
-                ) : (
-                  <View style={styles.embrapaProductsList}>
-                    {talhaoRecomendacoes.map((p, idx) => (
-                      <View key={`${p.pragaNome}-${idx}`} style={[styles.embrapaPragaBlock, { borderColor: borderColor + '80' }]}>
-                        <Text style={[styles.embrapaPragaNome, { color: textColor }]}>{p.pragaNome}</Text>
-                        {p.recomendacao ? (
-                          <Text style={[styles.embrapaRecText, { color: mutedColor }]}>{p.recomendacao}</Text>
-                        ) : null}
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-            )}
-
-              {/* Status de sincronização */}
-              <View style={styles.detailSyncRow}>
-                <View style={[
-                  styles.syncBadge, 
-                  { backgroundColor: selectedTask.synced ? '#10B98120' : '#F59E0B20' }
-                ]}>
-                  <View style={[
-                    styles.syncDot,
-                    { backgroundColor: selectedTask.synced ? '#10B981' : '#F59E0B' }
-                  ]} />
-                  <Text style={[styles.syncText, { 
-                    color: selectedTask.synced ? '#10B981' : '#F59E0B' 
-                  }]}>
-                    {selectedTask.synced ? 'Sincronizado' : 'Aguardando sincronização'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Ações */}
-              <View style={styles.detailActions}>
-              <TouchableOpacity 
-                style={[styles.detailActionBtn, { backgroundColor: '#10B98115' }]}
-                onPress={handleToggleStatus}
-                disabled={isToggling}
-              >
-                <Icon name={CheckCircle2} size={20} color="#10B981" />
-                <Text style={[styles.detailActionText, { color: '#10B981' }]}>
-                  {isToggling ? 'Atualizando...' : 
-                   selectedTask.status === 'concluida' ? 'Reabrir' : 'Concluir'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.detailActionBtn, { backgroundColor: primaryColor + '15' }]}
-                onPress={handleOpenEdit}
-              >
-                <Icon name={Edit3} size={20} color={primaryColor} />
-                <Text style={[styles.detailActionText, { color: primaryColor }]}>Editar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.detailActionBtn, { backgroundColor: '#EF444415' }]}
-                onPress={handleDelete}
-                disabled={isDeleting}
-              >
-                <Icon name={Trash2} size={20} color="#EF4444" />
-                <Text style={[styles.detailActionText, { color: '#EF4444' }]}>
-                  {isDeleting ? 'Excluindo...' : 'Excluir'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-              <Button
-                variant="outline"
-                onPress={() => { closeDetail(); setSelectedTask(null); }}
-                style={styles.closeDetailBtn}
-              >
-                <Text>Fechar</Text>
-              </Button>
-            </View>
-          </ScrollView>
-        )}
-      </BottomSheet>
+        task={selectedTask}
+        onToggleStatus={handleToggleStatus}
+        onEdit={handleOpenEdit}
+        onDelete={handleDelete}
+        isToggling={isToggling}
+        isDeleting={isDeleting}
+      />
 
       {/* Modal de Edição */}
       <BottomSheet
@@ -1195,27 +921,42 @@ export default function AtividadesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  headerSubtitle: {
-    fontSize: 14,
+  container: { flex: 1 },
+  headerDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
     marginTop: 4,
+    paddingHorizontal: 8,
+  },
+  summaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: -28,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 12,
+  },
+  summaryCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryCardContent: { flex: 1 },
+  summaryCardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  summaryCardText: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   addButton: {
     flexDirection: 'row',
@@ -1229,14 +970,6 @@ const styles = StyleSheet.create({
   addButtonText: {
     fontSize: 13,
     fontWeight: '600',
-  },
-  avatarContainer: {
-    position: 'relative',
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
   },
   searchSection: {
     paddingHorizontal: 16,
@@ -1414,6 +1147,21 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 8,
   },
+  sheetCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+  },
+  sheetCancelText: { fontSize: 15, fontWeight: '600' },
+  sheetConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  sheetConfirmText: { fontSize: 15, fontWeight: '600' },
   cancelButton: {
     flex: 1,
   },
@@ -1442,140 +1190,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'capitalize',
   },
-  // Estilos para modal de detalhes
-  detailScroll: {
-    maxHeight: '100%',
+  prioridadeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
   },
-  detailContainer: {
-    gap: 16,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  detailStatusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
-  },
-  detailStatusInfo: {
-    flex: 1,
-  },
-  detailStatusLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  detailStatusDate: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  detailSection: {
-    borderTopWidth: 1,
-    paddingTop: 16,
-  },
-  detailSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  detailSectionTitle: {
-    fontSize: 14,
+  prioridadeText: {
+    fontSize: 10,
     fontWeight: '600',
-    flex: 1,
-  },
-  detailSectionCount: {
-    fontSize: 12,
-  },
-  detailSectionContent: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  detailDatesList: {
-    gap: 8,
-  },
-  detailDateRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  detailDateLabel: {
-    fontSize: 13,
-  },
-  detailDateValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailSyncRow: {
-    alignItems: 'flex-start',
-    marginTop: 4,
-  },
-  syncBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-  },
-  syncDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  syncText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  detailTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  detailDescription: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  detailInfoGrid: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  detailInfoItem: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    gap: 6,
-  },
-  detailInfoLabel: {
-    fontSize: 11,
-    textTransform: 'uppercase',
-    fontWeight: '600',
-  },
-  detailInfoValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  detailActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  detailActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 14,
-    borderRadius: 10,
-    gap: 8,
-  },
-  detailActionText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  closeDetailBtn: {
-    marginTop: 8,
+    textTransform: 'capitalize',
   },
   // Estilos para seletor de talhão
   plotButton: {
@@ -1592,135 +1216,6 @@ const styles = StyleSheet.create({
   },
   plotButtonSubtext: {
     fontSize: 10,
-    marginTop: 2,
-  },
-  // Estilos para seção de scouts nos detalhes
-  scoutsSection: {
-    paddingTop: 16,
-    borderTopWidth: 1,
-  },
-  scoutsSectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  scoutsSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  scoutsSectionCount: {
-    fontSize: 12,
-  },
-  scoutsScroll: {
-    marginHorizontal: -16,
-    paddingHorizontal: 16,
-  },
-  scoutCard: {
-    width: 180,
-    padding: 12,
-    borderRadius: 10,
-    marginRight: 12,
-  },
-  scoutCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  scoutStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  scoutCardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  scoutCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  scoutCardText: {
-    fontSize: 12,
-  },
-  scoutPestsList: {
-    gap: 4,
-  },
-  scoutPestsTitle: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  scoutPestItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  severityDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  scoutPestName: {
-    fontSize: 12,
-    flex: 1,
-  },
-  scoutPestQty: {
-    fontSize: 11,
-  },
-  morePests: {
-    fontSize: 11,
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  noScoutsText: {
-    fontSize: 13,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-  noPestsText: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  embrapaEmptyText: {
-    fontSize: 13,
-    lineHeight: 20,
-    paddingVertical: 8,
-  },
-  embrapaProductsList: {
-    gap: 12,
-  },
-  embrapaPragaBlock: {
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: 6,
-  },
-  embrapaPragaNome: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  embrapaRecText: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  embrapaProductRow: {
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  embrapaProductNome: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  embrapaProductIngrediente: {
-    fontSize: 11,
     marginTop: 2,
   },
 });

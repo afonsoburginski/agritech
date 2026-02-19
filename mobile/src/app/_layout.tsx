@@ -2,7 +2,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
-import { useAuthStore, useAuthIsAuthenticated, useAuthIsLoading } from '@/stores/auth-store';
+import { useAuthStore, useAuthIsAuthenticated, useAuthIsLoading, usePendingFazendaChoice } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import type { AppState } from '@/stores/app-store';
 import { initWatermelonDB } from '@/database/watermelon';
@@ -21,6 +21,7 @@ export default function RootLayout() {
   const segments = useSegments();
   const isAuthenticated = useAuthIsAuthenticated();
   const isLoading = useAuthIsLoading();
+  const pendingFazendaChoice = usePendingFazendaChoice();
   const initialize = useAuthStore((state) => state.initialize);
   const loadAvatar = useAppStore((state: AppState) => state.loadAvatar);
 
@@ -94,18 +95,29 @@ export default function RootLayout() {
     };
   }, [initialize, loadAvatar]);
 
-  // Auth-based navigation guard
+  // Auth-based navigation guard: login → (se >1 fazenda) (auth)/escolher-fazenda → tabs
   useEffect(() => {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const onEscolherFazenda = segments[1] === 'escolher-fazenda';
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
-    } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(tabs)');
+      return;
     }
-  }, [isAuthenticated, segments, isLoading, router]);
+    if (isAuthenticated && inAuthGroup && !onEscolherFazenda) {
+      if (pendingFazendaChoice) {
+        router.replace('/(auth)/escolher-fazenda');
+      } else {
+        router.replace('/(tabs)');
+      }
+      return;
+    }
+    if (isAuthenticated && segments[0] === '(tabs)' && pendingFazendaChoice) {
+      router.replace('/(auth)/escolher-fazenda');
+    }
+  }, [isAuthenticated, segments, isLoading, pendingFazendaChoice, router]);
 
   return (
     <ThemeProvider>

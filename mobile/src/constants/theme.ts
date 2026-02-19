@@ -10,7 +10,7 @@ import { getAgroColors, palette } from './colors';
 const tintColorLight = palette.darkGreen; // Dark Green - cor principal
 const tintColorDark = palette.gold;       // Gold - cor de destaque no dark mode
 
-// Cores do tema Expo (usando paleta Agritech)
+// Cores do tema Expo (usando paleta Fox Fieldcore)
 export const Colors = {
   light: {
     text: '#1A1A1A',                  // Texto suave

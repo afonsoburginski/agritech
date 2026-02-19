@@ -1,11 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
-  Image,
-  Linking,
   Modal,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -16,18 +14,23 @@ import { useRouter } from 'expo-router';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
-import { HelpCircle, ClipboardList, Camera, Bug, CheckCircle2, Maximize2, X, MapPin, Calendar, Wheat, Sprout, Flower2, Leaf, Award, Gauge, AlertTriangle, AlertCircle, BarChart2, type LucideIcon } from 'lucide-react-native';
+import { ClipboardList, Camera, Bug, CheckCircle2, Maximize2, X, MapPin, Calendar, Wheat, Sprout, Flower2, Leaf, Award, Gauge, AlertTriangle, AlertCircle, BarChart2, type LucideIcon } from 'lucide-react-native';
 import { useSupabaseActivities, useSupabasePlots, useRecentScoutsWithPests, useFarmHealth, fetchTalhaoMonitoramentoDetail, type ScoutWithPestsSummary, type SupabaseActivity, type AtividadeTipo } from '@/hooks/use-supabase-data';
 import type { CulturaTalhaoEnum } from '@/types/supabase';
-import { useAvatarUri, useAppStore } from '@/stores/app-store';
+import { useAppStore } from '@/stores/app-store';
+import { useEffectiveAvatarUri } from '@/stores/auth-store';
 import { useAuthFazendaPadrao } from '@/stores/auth-store';
 import { BottomSheet } from '@/components/ui/bottom-sheet-simple';
 import { MonitoramentoDetailSheet, type MonitoramentoDetailPraga } from '@/components/monitoramento-detail-sheet';
+import { TaskDetailSheet, type AtividadeDetalhes } from '@/components/task-detail-sheet';
 import { Heatmap, type HeatmapMapType } from '@/components/maps/heatmap';
+import { AppHeader } from '@/components/app-header';
 import { useColor } from '@/hooks/useColor';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { palette } from '@/theme/colors';
+import { supabase, isSupabaseConfigured } from '@/services/supabase';
 
-const HEADER_GREEN = palette.darkGreen; // Verde padrão do app (#0e270a)
+const HEADER_GREEN = palette.darkGreen; // Verde padrão do app (light); no dark mantém para identidade
 const CONTENT_PADDING = 20;
 const MAX_ATIVIDADES_NO_CARD = 5;
 const MAX_MONITORAMENTOS_NO_CARD = 5;
@@ -42,8 +45,6 @@ const TIPOS_ATIVIDADE: { value: AtividadeTipo; label: string }[] = [
   { value: 'OUTROS', label: 'Outros' },
 ];
 
-const WHATSAPP_NUMBER = '556681358930'; // +55 66 8135-8930
-
 type SaudeLabel = 'Excelente' | 'Boa' | 'Regular' | 'Atenção' | 'Crítica' | 'Sem dados';
 const SAUDE_STYLE: Record<SaudeLabel, { icon: LucideIcon; color: string }> = {
   Excelente: { icon: Award, color: '#86efac' },
@@ -57,16 +58,6 @@ function getSaudeStyle(label: string): { icon: LucideIcon; color: string } {
   return SAUDE_STYLE[label as SaudeLabel] ?? SAUDE_STYLE['Sem dados'];
 }
 
-const DUVIDAS_OPCOES: { label: string; message: string }[] = [
-  { label: 'Tarefas e Atividades', message: 'Olá! Tenho dúvida sobre o módulo de Tarefas e Atividades do app Agritech.' },
-  { label: 'Monitoramento de pragas', message: 'Olá! Tenho dúvida sobre o Monitoramento de pragas e pontos de coleta.' },
-  { label: 'Reconhecimento de pragas (Scanner)', message: 'Olá! Tenho dúvida sobre o Reconhecimento de pragas pelo Scanner/IA.' },
-  { label: 'Saúde da fazenda', message: 'Olá! Tenho dúvida sobre o indicador de Saúde da fazenda e como é calculado.' },
-  { label: 'Relatórios', message: 'Olá! Tenho dúvida sobre a geração de Relatórios em PDF.' },
-  { label: 'Mapa de calor', message: 'Olá! Tenho dúvida sobre o Mapa de calor de pragas.' },
-  { label: 'Outra dúvida', message: 'Olá! Gostaria de tirar uma dúvida sobre o app Agritech.' },
-];
-
 function formatActivityDate(iso: string): string {
   try {
     const d = new Date(iso);
@@ -76,14 +67,15 @@ function formatActivityDate(iso: string): string {
   }
 }
 
-function getSituacaoStyle(situacao: string): { iconBg: string; iconLabel: string } {
+function getSituacaoStyle(situacao: string, isDark?: boolean): { iconBg: string; iconLabel: string } {
+  const dark = !!isDark;
   switch (situacao) {
     case 'CONCLUIDA':
-      return { iconBg: '#16a34a', iconLabel: 'C' };
+      return { iconBg: dark ? '#22c55e' : '#16a34a', iconLabel: 'C' };
     case 'EM_ANDAMENTO':
-      return { iconBg: '#3B7DD8', iconLabel: 'E' };
+      return { iconBg: dark ? '#60a5fa' : '#3B7DD8', iconLabel: 'E' };
     default:
-      return { iconBg: '#D4A617', iconLabel: 'P' }; // PENDENTE
+      return { iconBg: dark ? '#facc15' : '#D4A617', iconLabel: 'P' }; // PENDENTE
   }
 }
 
@@ -127,16 +119,17 @@ export default function InicioScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
-  const [duvidasModalVisible, setDuvidasModalVisible] = useState(false);
-  const [selectedDuvida, setSelectedDuvida] = useState<typeof DUVIDAS_OPCOES[0] | null>(null);
   const [mapFullscreenVisible, setMapFullscreenVisible] = useState(false);
   const [heatmapMapType, setHeatmapMapType] = useState<HeatmapMapType>('satellite');
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetPayload, setSheetPayload] = useState<SheetPayload | null>(null);
   const [taskDetailVisible, setTaskDetailVisible] = useState(false);
   const [selectedAtividade, setSelectedAtividade] = useState<SupabaseActivity | null>(null);
-  const avatarUri = useAvatarUri();
+  const avatarUri = useEffectiveAvatarUri();
   const { plots } = useSupabasePlots();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const backgroundColor = useColor({}, 'background');
   const cardColor = useColor({}, 'card');
   const textColor = useColor({}, 'text');
   const mutedColor = useColor({}, 'textMuted');
@@ -151,6 +144,74 @@ export default function InicioScreen() {
   const saudeStyle = !saudeLoading ? getSaudeStyle(saudeFazenda) : null;
   const atividadesExibir = activities.slice(0, MAX_ATIVIDADES_NO_CARD);
 
+  const detailTask = useMemo((): AtividadeDetalhes | null => {
+    if (!selectedAtividade) return null;
+    const firstTalhaoId = selectedAtividade.talhaoIds?.length ? selectedAtividade.talhaoIds[0] : undefined;
+    return {
+      id: selectedAtividade.id,
+      nome: selectedAtividade.titulo,
+      descricao: selectedAtividade.descricao,
+      tipo: selectedAtividade.tipo ?? 'OUTROS',
+      status: (selectedAtividade.situacao ?? 'PENDENTE').toLowerCase(),
+      plotId: firstTalhaoId != null ? String(firstTalhaoId) : undefined,
+      talhaoNome: firstTalhaoId != null ? plots.find((p) => p.id === firstTalhaoId)?.nome : undefined,
+      dataInicio: selectedAtividade.dataInicio ?? selectedAtividade.createdAt,
+      createdAt: selectedAtividade.createdAt,
+      synced: true,
+    };
+  }, [selectedAtividade, plots]);
+
+  const [isTogglingInicio, setIsTogglingInicio] = useState(false);
+  const [isDeletingInicio, setIsDeletingInicio] = useState(false);
+
+  const handleInicioToggleStatus = useCallback(async () => {
+    if (!detailTask || !isSupabaseConfigured() || !supabase) return;
+    try {
+      setIsTogglingInicio(true);
+      const newStatus = detailTask.status === 'concluida' ? 'pendente' : 'concluida';
+      await supabase
+        .from('atividades')
+        .update({ situacao: newStatus === 'concluida' ? 'CONCLUIDA' : 'PENDENTE', updated_at: new Date().toISOString() })
+        .eq('id', Number(detailTask.id));
+      await refreshActivities();
+    } finally {
+      setIsTogglingInicio(false);
+    }
+  }, [detailTask, refreshActivities]);
+
+  const handleInicioEdit = useCallback(() => {
+    setTaskDetailVisible(false);
+    setSelectedAtividade(null);
+    router.push('/(tabs)/atividades');
+  }, [router]);
+
+  const handleInicioDelete = useCallback(() => {
+    if (!detailTask) return;
+    Alert.alert(
+      'Excluir tarefa',
+      `Tem certeza que deseja excluir "${detailTask.nome}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            if (!isSupabaseConfigured() || !supabase) return;
+            try {
+              setIsDeletingInicio(true);
+              await supabase.from('atividades').update({ deleted_at: new Date().toISOString() }).eq('id', Number(detailTask.id));
+              await refreshActivities();
+              setTaskDetailVisible(false);
+              setSelectedAtividade(null);
+            } finally {
+              setIsDeletingInicio(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [detailTask, refreshActivities]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -160,24 +221,15 @@ export default function InicioScreen() {
     }
   }, [refreshActivities, refreshMonitoramentos, refreshSaude]);
 
-  const openWhatsApp = useCallback((message: string) => {
-    setDuvidasModalVisible(false);
-    setSelectedDuvida(null);
-    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-    Linking.openURL(url).catch(() => {});
-  }, []);
-
-  const handleConfirmarDuvida = useCallback(() => {
-    if (selectedDuvida) openWhatsApp(selectedDuvida.message);
-  }, [selectedDuvida, openWhatsApp]);
-
-  const closeDuvidasModal = useCallback(() => {
-    setDuvidasModalVisible(false);
-    setSelectedDuvida(null);
-  }, []);
+  const heatmapSwitcherBg = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)';
+  const heatmapSwitcherActiveBg = isDark ? 'rgba(255,255,255,0.25)' : HEADER_GREEN;
+  const heatmapSwitcherActiveText = '#fff';
+  const monitoramentoIconColor = isDark ? '#86efac' : HEADER_GREEN;
+  const monitoramentoIconBg = isDark ? 'rgba(134,239,172,0.18)' : 'rgba(22, 163, 74, 0.12)';
+  const cardAccentIconColor = isDark ? '#fff' : HEADER_GREEN;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor }]}>
       <View style={styles.pullRefreshGreen} pointerEvents="none" />
       {refreshing && (
         <View style={styles.refreshOverlay} pointerEvents="none">
@@ -198,94 +250,56 @@ export default function InicioScreen() {
           />
         }
       >
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-          <View style={styles.contentContainer}>
-            <View style={styles.headerRow}>
-              <View style={styles.headerSide}>
-                <TouchableOpacity
-                  onPress={() => router.push('/(tabs)/perfil')}
-                  activeOpacity={0.7}
-                  style={styles.avatarContainer}
-                >
-                  <Image
-                    source={avatarUri ? { uri: avatarUri } : require('../../../assets/images/avatar.jpg')}
-                    style={styles.avatar}
-                    resizeMode="cover"
-                  />
-                  <View
-                    style={[
-                      styles.statusDot,
-                      {
-                        backgroundColor: isOnline ? '#10B981' : '#9CA3AF',
-                        borderColor: HEADER_GREEN,
-                      },
-                    ]}
-                  >
-                    {!isOnline && <View style={[styles.offlineBar, { backgroundColor: HEADER_GREEN }]} />}
-                  </View>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {fazenda?.nome ?? 'Fazenda'}
+        <AppHeader
+          title={fazenda?.nome ?? 'Fazenda'}
+          avatarUri={avatarUri}
+          onAvatarPress={() => router.push('/(tabs)/perfil')}
+          isOnline={isOnline}
+          showDuvidasButton
+        >
+          {saudeLoading ? (
+            <View style={styles.saudeSkeleton} />
+          ) : (
+            <View style={styles.saudeRow}>
+              <Icon name={saudeStyle!.icon} size={32} color={saudeStyle!.color} style={styles.saudeIcon} />
+              <Text style={[styles.balanceAmount, { color: saudeStyle!.color }]}>
+                {saudeFazenda === 'Sem dados' ? 'Nenhum' : saudeFazenda}
               </Text>
-              <View style={styles.headerSide}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  onPress={() => setDuvidasModalVisible(true)}
-                >
-                  <Icon name={HelpCircle} size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
             </View>
-
-            <View style={styles.heroSection}>
-              {saudeLoading ? (
-                <View style={styles.saudeSkeleton} />
-              ) : (
-                <View style={styles.saudeRow}>
-                  <Icon name={saudeStyle!.icon} size={32} color={saudeStyle!.color} style={styles.saudeIcon} />
-                  <Text style={[styles.balanceAmount, { color: saudeStyle!.color }]}>
-                    {saudeFazenda === 'Sem dados' ? 'Nenhum' : saudeFazenda}
-                  </Text>
-                </View>
-              )}
-              <View style={styles.balanceBadge}>
-                <Text style={styles.balanceLabelText}>Saúde geral da fazenda</Text>
-              </View>
-
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  activeOpacity={0.8}
-                  onPress={() => router.push('/(tabs)/atividades?openForm=true')}
-                >
-                  <Icon name={ClipboardList} size={22} color="#fff" />
-                  <Text style={styles.actionButtonText}>Nova tarefa</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.actionButtonPrimary]}
-                  activeOpacity={0.8}
-                  onPress={() => router.push('/(tabs)/reconhecimento')}
-                >
-                  <Icon name={Camera} size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Escanear</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+          )}
+          <View style={styles.balanceBadge}>
+            <Text style={styles.balanceLabelText}>Saúde geral da fazenda</Text>
           </View>
-        </View>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              activeOpacity={0.8}
+              onPress={() => router.push('/(tabs)/atividades?openForm=true')}
+            >
+              <Icon name={ClipboardList} size={22} color="#fff" />
+              <Text style={styles.actionButtonText}>Nova tarefa</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.actionButtonPrimary]}
+              activeOpacity={0.8}
+              onPress={() => router.push('/(tabs)/reconhecimento')}
+            >
+              <Icon name={Camera} size={20} color="#fff" />
+              <Text style={styles.actionButtonText}>Escanear</Text>
+            </TouchableOpacity>
+          </View>
+        </AppHeader>
 
         <View style={[styles.contentContainer, styles.firstCardOverlap, styles.cardsWrapper]}>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>TAREFAS RECENTES</Text>
+          <View style={[styles.card, { backgroundColor: cardColor }]}>
+            <Text style={[styles.cardTitle, { color: mutedColor }]}>TAREFAS RECENTES</Text>
             {atividadesExibir.length === 0 ? (
               <View style={styles.emptyTransactions}>
-                <Text style={styles.emptyTransactionsText}>Nenhuma tarefa recente</Text>
+                <Text style={[styles.emptyTransactionsText, { color: mutedColor }]}>Nenhuma tarefa recente</Text>
               </View>
             ) : (
               atividadesExibir.map((atv, index) => {
-                const { iconBg, iconLabel } = getSituacaoStyle(atv.situacao);
+                const { iconBg, iconLabel } = getSituacaoStyle(atv.situacao, isDark);
                 const talhaoNome = atv.talhaoIds?.length ? plots.find(p => p.id === atv.talhaoIds?.[0])?.nome : undefined;
                 const tipoLabel = TIPOS_ATIVIDADE.find(t => t.value === atv.tipo)?.label ?? atv.tipo ?? '—';
                 return (
@@ -293,6 +307,7 @@ export default function InicioScreen() {
                     key={atv.id}
                     style={[
                       styles.transactionRow,
+                      { borderBottomColor: borderColor },
                       index === atividadesExibir.length - 1 && styles.transactionRowLast,
                     ]}
                     activeOpacity={0.7}
@@ -305,15 +320,15 @@ export default function InicioScreen() {
                       <Text style={styles.txIconText}>{iconLabel}</Text>
                     </View>
                     <View style={styles.txContent}>
-                      <Text style={styles.txName} numberOfLines={1}>{atv.titulo}</Text>
-                      <Text style={styles.txDate}>
+                      <Text style={[styles.txName, { color: textColor }]} numberOfLines={1}>{atv.titulo}</Text>
+                      <Text style={[styles.txDate, { color: mutedColor }]}>
                         {formatActivityDate(atv.createdAt)}
                         {talhaoNome ? ` · ${talhaoNome}` : ''}
                       </Text>
                     </View>
                     <View style={styles.txAmounts}>
-                      <Text style={styles.txAmountUsdc}>{getSituacaoLabel(atv.situacao)}</Text>
-                      <Text style={styles.txAmountFiat}>{tipoLabel}</Text>
+                      <Text style={[styles.txAmountUsdc, { color: textColor }]}>{getSituacaoLabel(atv.situacao)}</Text>
+                      <Text style={[styles.txAmountFiat, { color: mutedColor }]}>{tipoLabel}</Text>
                     </View>
                   </TouchableOpacity>
                 );
@@ -324,16 +339,16 @@ export default function InicioScreen() {
               activeOpacity={0.7}
               onPress={() => router.push('/(tabs)/atividades')}
             >
-              <Text style={styles.viewAllLinkText}>Ver todas as tarefas</Text>
+              <Text style={[styles.viewAllLinkText, { color: primaryColor }]}>Ver todas as tarefas</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>MONITORAMENTOS RECENTES COM PRAGAS</Text>
+          <View style={[styles.card, { backgroundColor: cardColor }]}>
+            <Text style={[styles.cardTitle, { color: mutedColor }]}>MONITORAMENTOS RECENTES COM PRAGAS</Text>
             {monitoramentosComPragas.length === 0 ? (
               <View style={styles.emptyMonitoramentos}>
-                <Icon name={Bug} size={32} color="#71717a" />
-                <Text style={styles.emptyMonitoramentosText}>Nenhum monitoramento com pragas identificadas</Text>
+                <Icon name={Bug} size={32} color={mutedColor} />
+                <Text style={[styles.emptyMonitoramentosText, { color: mutedColor }]}>Nenhum monitoramento com pragas identificadas</Text>
               </View>
             ) : (
               <>
@@ -342,6 +357,7 @@ export default function InicioScreen() {
                     key={scout.talhaoId ?? scout.id}
                     style={[
                       styles.monitoramentoRow,
+                      { borderBottomColor: borderColor },
                       index === monitoramentosComPragas.length - 1 && styles.monitoramentoRowLast,
                     ]}
                     activeOpacity={0.7}
@@ -378,28 +394,28 @@ export default function InicioScreen() {
                       }
                     }}
                   >
-                    <View style={styles.monitoramentoIcon}>
-                      <Icon name={getCulturaIcon(scout.cultura ?? scout.talhaoCulturaAtual)} size={20} color={HEADER_GREEN} />
+                    <View style={[styles.monitoramentoIcon, { backgroundColor: monitoramentoIconBg }]}>
+                      <Icon name={getCulturaIcon(scout.cultura ?? scout.talhaoCulturaAtual)} size={20} color={monitoramentoIconColor} />
                     </View>
                     <View style={styles.monitoramentoContent}>
                       <Text style={styles.monitoramentoTitleRow} numberOfLines={1}>
-                        <Text style={styles.monitoramentoNome}>
+                        <Text style={[styles.monitoramentoNome, { color: textColor }]}>
                           {scout.talhaoNome || scout.nome || `Ponto #${scout.id}`}
                         </Text>
                         {scout.talhaoCulturaAtual ? (
                           <>
-                            <Text style={styles.monitoramentoBullet}> • </Text>
-                            <Text style={styles.monitoramentoCultura}>{scout.talhaoCulturaAtual}</Text>
+                            <Text style={[styles.monitoramentoBullet, { color: mutedColor }]}> • </Text>
+                            <Text style={[styles.monitoramentoCultura, { color: mutedColor }]}>{scout.talhaoCulturaAtual}</Text>
                           </>
                         ) : null}
                         {scout.percentualInfestacao != null && scout.percentualInfestacao > 0 ? (
                           <>
-                            <Text style={styles.monitoramentoBullet}> • </Text>
+                            <Text style={[styles.monitoramentoBullet, { color: mutedColor }]}> • </Text>
                             <Text style={styles.monitoramentoPercentual}>{Number(scout.percentualInfestacao).toFixed(1)}% infestação</Text>
                           </>
                         ) : null}
                       </Text>
-                      <Text style={styles.monitoramentoMeta}>
+                      <Text style={[styles.monitoramentoMeta, { color: mutedColor }]}>
                         {formatActivityDate(scout.createdAt)} · {scout.totalPragas} {scout.totalPragas === 1 ? 'praga' : 'pragas'}
                       </Text>
                     </View>
@@ -410,29 +426,29 @@ export default function InicioScreen() {
                   activeOpacity={0.7}
                   onPress={() => router.push('/(tabs)/monitoramento')}
                 >
-                  <Text style={styles.viewAllLinkText}>Ver todos os monitoramentos</Text>
+                  <Text style={[styles.viewAllLinkText, { color: primaryColor }]}>Ver todos os monitoramentos</Text>
                 </TouchableOpacity>
               </>
             )}
           </View>
 
-          <View style={styles.card}>
+          <View style={[styles.card, { backgroundColor: cardColor }]}>
             <View style={styles.heatmapTitleRow}>
-              <Text style={[styles.cardTitle, styles.heatmapCardTitleInline]}>MAPA DE PRAGAS</Text>
-              <View style={styles.heatmapSwitcher}>
+              <Text style={[styles.cardTitle, styles.heatmapCardTitleInline, { color: mutedColor }]}>MAPA DE PRAGAS</Text>
+              <View style={[styles.heatmapSwitcher, { backgroundColor: heatmapSwitcherBg }]}>
                 <TouchableOpacity
-                  style={[styles.heatmapSwitcherBtn, heatmapMapType === 'satellite' && styles.heatmapSwitcherBtnActive]}
+                  style={[styles.heatmapSwitcherBtn, heatmapMapType === 'satellite' && { backgroundColor: heatmapSwitcherActiveBg }]}
                   onPress={() => setHeatmapMapType('satellite')}
                   activeOpacity={0.8}
                 >
-                  <Text style={[styles.heatmapSwitcherText, heatmapMapType === 'satellite' && styles.heatmapSwitcherTextActive]}>Satélite</Text>
+                  <Text style={[styles.heatmapSwitcherText, { color: mutedColor }, heatmapMapType === 'satellite' && { color: heatmapSwitcherActiveText }]}>Satélite</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.heatmapSwitcherBtn, heatmapMapType === 'street' && styles.heatmapSwitcherBtnActive]}
+                  style={[styles.heatmapSwitcherBtn, heatmapMapType === 'street' && { backgroundColor: heatmapSwitcherActiveBg }]}
                   onPress={() => setHeatmapMapType('street')}
                   activeOpacity={0.8}
                 >
-                  <Text style={[styles.heatmapSwitcherText, heatmapMapType === 'street' && styles.heatmapSwitcherTextActive]}>Mapa</Text>
+                  <Text style={[styles.heatmapSwitcherText, { color: mutedColor }, heatmapMapType === 'street' && { color: heatmapSwitcherActiveText }]}>Mapa</Text>
                 </TouchableOpacity>
               </View>
               <TouchableOpacity
@@ -440,7 +456,7 @@ export default function InicioScreen() {
                 activeOpacity={0.8}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Icon name={Maximize2} size={14} color={HEADER_GREEN} />
+                <Icon name={Maximize2} size={14} color={cardAccentIconColor} />
               </TouchableOpacity>
             </View>
             <View style={styles.heatmapWrapper}>
@@ -455,7 +471,7 @@ export default function InicioScreen() {
         animationType="fade"
         onRequestClose={() => setMapFullscreenVisible(false)}
       >
-        <View style={styles.mapFullscreenContainer}>
+        <View style={[styles.mapFullscreenContainer, { backgroundColor: isDark ? backgroundColor : '#1a1a1a' }]}>
           <TouchableOpacity
             style={[styles.mapFullscreenClose, { paddingTop: insets.top + 12 }]}
             onPress={() => setMapFullscreenVisible(false)}
@@ -468,57 +484,6 @@ export default function InicioScreen() {
             <Heatmap height={Math.max(280, screenHeight - insets.top - 68)} mapType={heatmapMapType} />
           </View>
         </View>
-      </Modal>
-
-      <Modal
-        visible={duvidasModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeDuvidasModal}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={closeDuvidasModal}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Em qual módulo você tem dúvida?</Text>
-            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
-              {DUVIDAS_OPCOES.map((op) => {
-                const isSelected = selectedDuvida?.label === op.label;
-                return (
-                  <TouchableOpacity
-                    key={op.label}
-                    style={[
-                      styles.modalOption,
-                      isSelected && { backgroundColor: HEADER_GREEN + '18', borderWidth: 1.5, borderColor: HEADER_GREEN },
-                    ]}
-                    activeOpacity={0.7}
-                    onPress={() => setSelectedDuvida(op)}
-                  >
-                    <Icon name={HelpCircle} size={18} color={HEADER_GREEN} />
-                    <Text style={styles.modalOptionText}>{op.label}</Text>
-                    {isSelected && <Icon name={CheckCircle2} size={20} color={HEADER_GREEN} />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <TouchableOpacity
-              style={[
-                styles.modalConfirmBtn,
-                { backgroundColor: HEADER_GREEN, opacity: selectedDuvida ? 1 : 0.5 },
-              ]}
-              activeOpacity={0.7}
-              onPress={handleConfirmarDuvida}
-              disabled={!selectedDuvida}
-            >
-              <Text style={styles.modalConfirmText}>Confirmar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalCancelBtn, { borderColor: HEADER_GREEN }]}
-              activeOpacity={0.7}
-              onPress={closeDuvidasModal}
-            >
-              <Text style={[styles.modalCancelText, { color: HEADER_GREEN }]}>Cancelar</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
       </Modal>
 
       {sheetPayload != null && (
@@ -544,89 +509,16 @@ export default function InicioScreen() {
         </BottomSheet>
       )}
 
-      {/* Bottom sheet: detalhes da tarefa (só leitura) */}
-      <BottomSheet
+      <TaskDetailSheet
         isVisible={taskDetailVisible}
         onClose={() => { setTaskDetailVisible(false); setSelectedAtividade(null); }}
-        title={selectedAtividade?.titulo ?? 'Detalhes da Tarefa'}
-      >
-        {selectedAtividade && (
-          <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
-            <View style={{ paddingHorizontal: 4, paddingBottom: 24 }}>
-              <View style={[styles.detailStatusCardInicio, {
-                backgroundColor: selectedAtividade.situacao === 'CONCLUIDA' ? '#10B98115' :
-                  selectedAtividade.situacao === 'EM_ANDAMENTO' ? '#F59E0B15' : primaryColor + '15',
-              }]}>
-                <Icon
-                  name={selectedAtividade.situacao === 'CONCLUIDA' ? CheckCircle2 : Calendar}
-                  size={22}
-                  color={selectedAtividade.situacao === 'CONCLUIDA' ? '#10B981' :
-                    selectedAtividade.situacao === 'EM_ANDAMENTO' ? '#F59E0B' : primaryColor}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.detailStatusLabelInicio, {
-                    color: selectedAtividade.situacao === 'CONCLUIDA' ? '#10B981' :
-                      selectedAtividade.situacao === 'EM_ANDAMENTO' ? '#F59E0B' : primaryColor,
-                  }]}>
-                    {getSituacaoLabel(selectedAtividade.situacao)}
-                  </Text>
-                  <Text style={[styles.detailDateInicio, { color: mutedColor }]}>
-                    Criada em {new Date(selectedAtividade.createdAt).toLocaleDateString('pt-BR', {
-                      day: '2-digit', month: 'long', year: 'numeric',
-                    })}
-                  </Text>
-                </View>
-              </View>
-
-              {selectedAtividade.descricao ? (
-                <View style={[styles.detailSectionInicio, { borderColor }]}>
-                  <View style={styles.detailSectionHeaderInicio}>
-                    <Icon name={ClipboardList} size={16} color={primaryColor} />
-                    <Text style={[styles.detailSectionTitleInicio, { color: textColor }]}>Descrição</Text>
-                  </View>
-                  <Text style={[styles.detailSectionContentInicio, { color: textColor }]}>
-                    {selectedAtividade.descricao}
-                  </Text>
-                </View>
-              ) : null}
-
-              <View style={[styles.detailSectionInicio, { borderColor }]}>
-                <View style={styles.detailSectionHeaderInicio}>
-                  <Icon name={CheckCircle2} size={16} color={palette.gold} />
-                  <Text style={[styles.detailSectionTitleInicio, { color: textColor }]}>Tipo</Text>
-                </View>
-                <Text style={[styles.detailSectionContentInicio, { color: textColor }]}>
-                  {TIPOS_ATIVIDADE.find(t => t.value === selectedAtividade.tipo)?.label ?? selectedAtividade.tipo ?? '—'}
-                </Text>
-              </View>
-
-              <View style={[styles.detailSectionInicio, { borderColor }]}>
-                <View style={styles.detailSectionHeaderInicio}>
-                  <Icon name={MapPin} size={16} color={primaryColor} />
-                  <Text style={[styles.detailSectionTitleInicio, { color: textColor }]}>Talhão</Text>
-                </View>
-                <Text style={[styles.detailSectionContentInicio, { color: textColor }]}>
-                  {selectedAtividade.talhaoIds?.length
-                    ? selectedAtividade.talhaoIds.map(id => plots.find(p => p.id === id)?.nome).filter(Boolean).join(', ') || '—'
-                    : 'Não definido'}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.verTarefasBtn, { backgroundColor: HEADER_GREEN }]}
-                activeOpacity={0.8}
-                onPress={() => {
-                  setTaskDetailVisible(false);
-                  setSelectedAtividade(null);
-                  router.push('/(tabs)/atividades');
-                }}
-              >
-                <Text style={styles.verTarefasBtnText}>Ver na tela Tarefas</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        )}
-      </BottomSheet>
+        task={detailTask}
+        onToggleStatus={handleInicioToggleStatus}
+        onEdit={handleInicioEdit}
+        onDelete={handleInicioDelete}
+        isToggling={isTogglingInicio}
+        isDeleting={isDeletingInicio}
+      />
     </View>
   );
 }
@@ -634,13 +526,7 @@ export default function InicioScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: HEADER_GREEN,
-    paddingBottom: 56,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
+    backgroundColor: '#F7F5F0', // fallback light; override inline por tema
   },
   pullRefreshGreen: {
     position: 'absolute',
@@ -668,53 +554,6 @@ const styles = StyleSheet.create({
   },
   cardsWrapper: {
     gap: 16,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  headerSide: {
-    width: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-    marginHorizontal: 8,
-  },
-  avatarContainer: {
-    position: 'relative',
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
-  statusDot: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  offlineBar: {
-    width: 6,
-    height: 2,
-    borderRadius: 1,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   saudeRow: {
     flexDirection: 'row',
@@ -829,16 +668,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
-  heatmapSwitcherBtnActive: {
-    backgroundColor: HEADER_GREEN,
-  },
   heatmapSwitcherText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#64748B',
-  },
-  heatmapSwitcherTextActive: {
-    color: '#fff',
   },
   heatmapWrapper: {
     position: 'relative',
@@ -965,7 +798,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 10,
-    backgroundColor: 'rgba(22, 163, 74, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -1000,117 +832,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#71717a',
     marginTop: 2,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    width: '100%',
-    maxWidth: 340,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  modalList: {
-    maxHeight: 320,
-  },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: '#f5f5f5',
-    marginBottom: 8,
-  },
-  modalOptionText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#1a1a1a',
-    flex: 1,
-  },
-  modalConfirmBtn: {
-    marginTop: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    opacity: 1,
-  },
-  modalConfirmText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  modalCancelBtn: {
-    marginTop: 10,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: 'center',
-  },
-  modalCancelText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  // Task detail bottom sheet (inicio)
-  detailStatusCardInicio: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 16,
-  },
-  detailStatusLabelInicio: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  detailDateInicio: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-  detailSectionInicio: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
-  },
-  detailSectionHeaderInicio: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  detailSectionTitleInicio: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailSectionContentInicio: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  verTarefasBtn: {
-    marginTop: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  verTarefasBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
   },
 });

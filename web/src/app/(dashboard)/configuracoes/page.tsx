@@ -143,7 +143,7 @@ export default function ConfiguracoesPage() {
           <CardHeader className="bg-muted/30 pb-4">
             <CardTitle className="flex items-center gap-2 text-xl">
               <Info className="h-5 w-5" />
-              Sobre o AGROV
+              Sobre o Fox Fieldcore
             </CardTitle>
             <CardDescription>Versão e informações do aplicativo.</CardDescription>
           </CardHeader>
@@ -169,7 +169,7 @@ export default function ConfiguracoesPage() {
             Status das integrações
           </CardTitle>
           <CardDescription>
-            Conectividade com os serviços usados pelo AGROV. Atualizado a cada minuto.
+            Conectividade com os serviços usados pelo Fox Fieldcore. Atualizado a cada minuto.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">

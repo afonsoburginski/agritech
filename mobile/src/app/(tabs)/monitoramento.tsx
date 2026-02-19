@@ -1,19 +1,21 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image, SectionList } from 'react-native';
+import { StyleSheet, TouchableOpacity, TextInput, Alert, SectionList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
-import { Button } from '@/components/ui/button';
+import { AppHeader } from '@/components/app-header';
 import { BottomSheet, useBottomSheet } from '@/components/ui/bottom-sheet-simple';
 import { MonitoramentoDetailSheet, type MonitoramentoDetailPraga } from '@/components/monitoramento-detail-sheet';
 import { useScouts } from '@/hooks/use-scouts';
 import { useSupabaseScouts, fetchTalhaoMonitoramentoDetail } from '@/hooks/use-supabase-data';
 import { useLocation } from '@/hooks/use-location';
 import { useColor } from '@/hooks/useColor';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
-import { useAvatarUri, useAppStore } from '@/stores/app-store';
+import { useAppStore } from '@/stores/app-store';
+import { useEffectiveAvatarUri } from '@/stores/auth-store';
 import {
   Bug,
   Search,
@@ -27,6 +29,7 @@ import {
   TrendingUp,
   TrendingDown,
   Minus as MinusIcon,
+  BarChart2,
 } from 'lucide-react-native';
 
 interface ScoutDetail {
@@ -86,7 +89,7 @@ function formatMonthLabel(key: string): string {
 
 export default function MonitoramentoScreen() {
   const router = useRouter();
-  const avatarUri = useAvatarUri();
+  const avatarUri = useEffectiveAvatarUri();
   const backgroundColor = useColor({}, 'background');
   const cardColor = useColor({}, 'card');
   const textColor = useColor({}, 'text');
@@ -94,6 +97,13 @@ export default function MonitoramentoScreen() {
   const borderColor = useColor({}, 'border');
   const primaryColor = useColor({}, 'primary');
   const [searchQuery, setSearchQuery] = useState('');
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const sheetAccent = isDark ? '#fff' : palette.darkGreen;
+  const sheetConfirmStyle = isDark
+    ? { backgroundColor: 'rgba(255,255,255,0.2)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' }
+    : { backgroundColor: palette.darkGreen + '20', borderWidth: 1, borderColor: palette.darkGreen };
+  const sheetConfirmTextColor = isDark ? '#fff' : palette.darkGreen;
 
   const { isOnline } = useAppStore();
   const { scouts: localScouts, create, refresh } = useScouts();
@@ -359,44 +369,31 @@ export default function MonitoramentoScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.headerTitle, { color: textColor }]}>Monitoramento</Text>
-          <Text style={[styles.headerSubtitle, { color: mutedColor }]}>
-            {totalPragasCurrentMonth} pragas · {currentMonthScouts.length} pontos este mês
-          </Text>
-        </View>
-        <TouchableOpacity onPress={handlePerfil} activeOpacity={0.7} style={styles.avatarContainer}>
-          <Image
-            source={avatarUri ? { uri: avatarUri } : require('../../../assets/images/avatar.jpg')}
-            style={styles.avatar}
-            resizeMode="cover"
-          />
-        </TouchableOpacity>
-      </View>
+      <AppHeader
+        title="Monitoramento"
+        avatarUri={avatarUri}
+        onAvatarPress={handlePerfil}
+        isOnline={isOnline}
+        showDuvidasButton
+      >
+        <Text style={styles.headerDescription}>
+          Pontos de coleta por talhão, pragas identificadas e acompanhamento de visitas no campo.
+        </Text>
+      </AppHeader>
 
-      {/* Stats — current month */}
-      <View style={styles.statsRow}>
-        <View style={[styles.statCard, { backgroundColor: cardColor }]}>
-          <View style={[styles.statIcon, { backgroundColor: palette.gold + '20' }]}>
-            <Icon name={AlertTriangle} size={18} color={palette.gold} />
-          </View>
-          <Text style={[styles.statValue, { color: textColor }]}>{totalPragasCurrentMonth}</Text>
-          <Text style={[styles.statLabel, { color: mutedColor }]}>Pragas</Text>
+      {/* Card resumo do mês */}
+      <View style={[styles.summaryCard, { backgroundColor: cardColor, borderColor }]}>
+        <View style={[styles.summaryCardIcon, { backgroundColor: palette.gold + '20' }]}>
+          <Icon name={BarChart2} size={20} color={palette.gold} />
         </View>
-        <View style={[styles.statCard, { backgroundColor: cardColor }]}>
-          <View style={[styles.statIcon, { backgroundColor: '#10B981' + '20' }]}>
-            <Icon name={Eye} size={18} color="#10B981" />
-          </View>
-          <Text style={[styles.statValue, { color: textColor }]}>{currentMonthScouts.filter(s => s.visitado).length}</Text>
-          <Text style={[styles.statLabel, { color: mutedColor }]}>Visitados</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: cardColor }]}>
-          <View style={[styles.statIcon, { backgroundColor: '#F59E0B' + '20' }]}>
-            <Icon name={EyeOff} size={18} color="#F59E0B" />
-          </View>
-          <Text style={[styles.statValue, { color: textColor }]}>{currentMonthScouts.filter(s => !s.visitado).length}</Text>
-          <Text style={[styles.statLabel, { color: mutedColor }]}>Pendentes</Text>
+        <View style={styles.summaryCardContent}>
+          <Text style={[styles.summaryCardTitle, { color: textColor }]}>Resumo do mês</Text>
+          <Text style={[styles.summaryCardText, { color: mutedColor }]}>
+            {totalPragasCurrentMonth} {totalPragasCurrentMonth === 1 ? 'praga' : 'pragas'} em {currentMonthScouts.length} {currentMonthScouts.length === 1 ? 'ponto' : 'pontos'} de coleta
+            {currentMonthScouts.length > 0
+              ? ` · ${currentMonthScouts.filter(s => s.visitado).length} visitados, ${currentMonthScouts.filter(s => !s.visitado).length} pendentes`
+              : ''}
+          </Text>
         </View>
       </View>
 
@@ -516,19 +513,23 @@ export default function MonitoramentoScreen() {
             </View>
           )}
           <View style={styles.formActions}>
-            <Button variant="outline" onPress={close} style={styles.cancelButton}>
-              <Text>Cancelar</Text>
-            </Button>
-            <Button
-              variant="default"
+            <TouchableOpacity
+              style={[styles.sheetCancelBtn, { borderColor: sheetAccent }]}
+              onPress={close}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.sheetCancelText, { color: sheetAccent }]}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sheetConfirmBtn, sheetConfirmStyle, (!location || isSubmitting) && { opacity: 0.5 }]}
               onPress={handleSubmit}
-              style={[styles.submitButton, { backgroundColor: palette.gold }]}
+              activeOpacity={0.7}
               disabled={isSubmitting || !location}
             >
-              <Text style={{ color: '#000000', fontWeight: '600' }}>
+              <Text style={[styles.sheetConfirmText, { color: sheetConfirmTextColor }]}>
                 {isSubmitting ? 'Salvando...' : 'Criar'}
               </Text>
-            </Button>
+            </TouchableOpacity>
           </View>
         </View>
       </BottomSheet>
@@ -561,41 +562,42 @@ export default function MonitoramentoScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
+  headerDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+    marginTop: 4,
+    paddingHorizontal: 8,
+  },
+  summaryCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  headerLeft: { flex: 1 },
-  headerTitle: { fontSize: 28, fontWeight: '700' },
-  headerSubtitle: { fontSize: 14, marginTop: 4 },
-  avatarContainer: { position: 'relative' },
-  avatar: { width: 44, height: 44, borderRadius: 22 },
-  statsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 10,
-    marginBottom: 16,
-  },
-  statCard: {
-    flex: 1,
-    padding: 12,
+    marginHorizontal: 16,
+    marginTop: -28,
+    marginBottom: 12,
+    padding: 14,
     borderRadius: 12,
-    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 12,
   },
-  statIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  summaryCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
   },
-  statValue: { fontSize: 20, fontWeight: '700' },
-  statLabel: { fontSize: 11, marginTop: 2 },
+  summaryCardContent: { flex: 1 },
+  summaryCardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  summaryCardText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
   searchSection: {
     flexDirection: 'row',
     paddingHorizontal: 16,
@@ -717,6 +719,19 @@ const styles = StyleSheet.create({
   locationCoords: { fontSize: 14, fontWeight: '600', fontFamily: 'monospace' },
   locationAccuracy: { fontSize: 11 },
   formActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  cancelButton: { flex: 1 },
-  submitButton: { flex: 1 },
+  sheetCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+  },
+  sheetCancelText: { fontSize: 15, fontWeight: '600' },
+  sheetConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  sheetConfirmText: { fontSize: 15, fontWeight: '600' },
 });

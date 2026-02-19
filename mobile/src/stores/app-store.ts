@@ -16,7 +16,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from '@/services/logger';
 
-const AVATAR_STORAGE_KEY = '@agritech:user_avatar';
+const AVATAR_STORAGE_KEY = '@foxfieldcore:user_avatar';
 
 export interface AppState {
   // Conexão

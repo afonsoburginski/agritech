@@ -1,4 +1,4 @@
-# System Design - Agrov Mobile
+# System Design - Fox Fieldcore Mobile
 
 > Documento de referência para IA. Define COMO o app funciona tecnicamente.
 
@@ -49,7 +49,7 @@
 │                      SERVICES                          │
 │  services/                                            │
 │    supabase.ts        → Supabase client (auth + DB)   │
-│    api.ts             → AGROV ERP API (legado)        │
+│    api.ts             → Fox Fieldcore API (legado)        │
 │    auth-service.ts    → Login/logout                  │
 │    sync-service.ts    → Sincronização offline          │
 │    location-service.ts→ GPS                           │
@@ -64,7 +64,7 @@
 │  database/           │  │  Supabase (Postgres + Auth)   │
 │    db.ts (SQLite)    │  │  Embrapa AGROFIT API          │
 │    schema.ts         │  │  OpenAI API                   │
-│    migrations/       │  │  AGROV ERP API (legado)       │
+│    migrations/       │  │  Fox Fieldcore API (legado)       │
 └─────────────────────┘  └───────────────────────────────┘
 ```
 
@@ -103,7 +103,7 @@ src/
 │   └── use-supabase-data.ts # Dados do Supabase
 ├── services/               # Lógica de infraestrutura
 │   ├── supabase.ts         # Supabase client
-│   ├── api.ts              # Axios instance (AGROV ERP)
+│   ├── api.ts              # Axios instance (Fox Fieldcore)
 │   ├── auth-service.ts     # Login/logout/refresh
 │   ├── sync-service.ts     # Fila de sync
 │   ├── location-service.ts # GPS com retry
@@ -193,7 +193,7 @@ Todas as tabelas usam RLS. Regras:
 - **Variável (.env):** `OPENAI_API_KEY`
 - **Fluxo:** foto → base64 → OpenAI → resposta com identificação
 
-### 5.3 AGROV ERP API (legado)
+### 5.3 Fox Fieldcore API (legado)
 
 - **Base URL:** configurável (originalmente `http://localhost:8080`)
 - **Auth:** JWT próprio (email + senha → token)

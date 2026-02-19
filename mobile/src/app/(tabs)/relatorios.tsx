@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { StyleSheet, TouchableOpacity, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { useRouter } from 'expo-router';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
+import { AppHeader } from '@/components/app-header';
 import { useColor } from '@/hooks/useColor';
 import { useAuthFazendaPadrao } from '@/stores/auth-store';
+import { useAppStore } from '@/stores/app-store';
+import { useEffectiveAvatarUri } from '@/stores/auth-store';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
 import {
@@ -32,6 +36,9 @@ interface GeneratedReport {
 }
 
 export default function RelatoriosScreen() {
+  const router = useRouter();
+  const avatarUri = useEffectiveAvatarUri();
+  const { isOnline } = useAppStore();
   const backgroundColor = useColor({}, 'background');
   const cardColor = useColor({}, 'card');
   const textColor = useColor({}, 'text');
@@ -95,15 +102,20 @@ export default function RelatoriosScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor }]} showsVerticalScrollIndicator={false}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: textColor }]}>Relatórios</Text>
-        <Text style={[styles.headerSubtitle, { color: mutedColor }]}>
-          Gere relatórios técnicos em PDF
+    <View style={[styles.container, { backgroundColor }]}>
+      <AppHeader
+        title="Relatórios"
+        avatarUri={avatarUri}
+        onAvatarPress={() => router.push('/(tabs)/perfil')}
+        isOnline={isOnline}
+        showDuvidasButton
+      >
+        <Text style={styles.headerDescription}>
+          Gere relatórios técnicos em PDF: responsável técnico, pragas e doenças, com dados da fazenda.
         </Text>
-      </View>
+      </AppHeader>
 
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       {/* Report Types */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: textColor }]}>Gerar Novo Relatório</Text>
@@ -230,26 +242,22 @@ export default function RelatoriosScreen() {
       </View>
 
       <View style={{ height: 40 }} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  headerSubtitle: {
-    fontSize: 14,
+  container: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingTop: 16, paddingBottom: 24 },
+  headerDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
     marginTop: 4,
+    paddingHorizontal: 8,
   },
   section: {
     paddingHorizontal: 16,

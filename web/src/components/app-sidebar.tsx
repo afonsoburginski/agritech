@@ -99,11 +99,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuButton size="lg" asChild>
               <Link href="/" className="flex items-center gap-2">
                 <div className="relative flex aspect-square size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary/10">
-                  <Image src="/images/logo.png" alt="AGROV" fill className="object-contain p-0.5" sizes="32px" />
+                  <Image src="/images/logo.png" alt="Fox Fieldcore" fill className="object-contain p-0.5" sizes="32px" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">AGROV</span>
-                  <span className="truncate text-xs text-muted-foreground">ERP Agrícola</span>
+                  <span className="truncate font-semibold">Fox Fieldcore</span>
+                  <span className="truncate text-xs text-muted-foreground">Monitoramento Agrícola</span>
                 </div>
               </Link>
             </SidebarMenuButton>

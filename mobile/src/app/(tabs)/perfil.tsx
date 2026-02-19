@@ -1,4 +1,5 @@
-import { ScrollView, StyleSheet, TouchableOpacity, Alert, Appearance, Image } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, Alert, Appearance, Image, Modal, Pressable } from 'react-native';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { Card } from '@/components/ui/card';
@@ -6,8 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useColor } from '@/hooks/useColor';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
-import { useAuthUser, useAuthFazendaPadrao, useAuthStore } from '@/stores/auth-store';
-import { useAppStore, useAvatarUri } from '@/stores/app-store';
+import { useAuthUser, useAuthFazendaPadrao, useAuthStore, useEffectiveAvatarUri } from '@/stores/auth-store';
 import { useCamera } from '@/hooks/use-camera';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Switch } from '@/components/ui/switch';
@@ -39,9 +39,18 @@ export default function PerfilScreen() {
   const user = useAuthUser();
   const fazenda = useAuthFazendaPadrao();
   const signOut = useAuthStore((state) => state.signOut);
-  const avatarUri = useAvatarUri();
-  const setAvatar = useAppStore((state) => state.setAvatar);
+  const uploadAvatar = useAuthStore((state) => state.uploadAvatar);
+  const loadFazendas = useAuthStore((state) => state.loadFazendas);
+  const setFazendaPadrao = useAuthStore((state) => state.setFazendaPadrao);
+  const avatarUri = useEffectiveAvatarUri();
   const { takePhoto, pickFromGallery } = useCamera();
+  const [fazendasList, setFazendasList] = useState<{ id: number; nome: string; role?: string }[]>([]);
+  const [trocarFazendaModalVisible, setTrocarFazendaModalVisible] = useState(false);
+
+  useEffect(() => {
+    loadFazendas().then(setFazendasList);
+  }, [loadFazendas]);
+  const canTrocarFazenda = fazendasList.length > 1;
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { isOnline, isSyncing, pendingCount, forceSync, getLastSyncText } = useSync();
@@ -88,7 +97,7 @@ export default function PerfilScreen() {
             try {
               const photo = await takePhoto();
               if (photo?.uri) {
-                await setAvatar(photo.uri);
+                await uploadAvatar(photo.uri);
               }
             } catch (error: any) {
               Alert.alert('Erro', error.message || 'Erro ao capturar foto');
@@ -101,7 +110,7 @@ export default function PerfilScreen() {
             try {
               const image = await pickFromGallery();
               if (image?.uri) {
-                await setAvatar(image.uri);
+                await uploadAvatar(image.uri);
               }
             } catch (error: any) {
               Alert.alert('Erro', error.message || 'Erro ao selecionar imagem');

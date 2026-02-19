@@ -1,4 +1,4 @@
-# Regras de Negócio - Agrov Mobile
+# Regras de Negócio - Fox Fieldcore
 
 > Documento de referência para IA. Define O QUE o app faz e POR QUÊ.
 
@@ -6,7 +6,7 @@
 
 ## 1. Propósito do App
 
-O **Agrov Mobile** é um app de campo para técnicos e produtores agrícolas. Funciona como extensão mobile do ERP AGROV. Permite:
+O **Fox Fieldcore** é um app de campo para técnicos e produtores agrícolas. Funciona como extensão mobile da plataforma Fox Fieldcore. Permite:
 
 - Registrar **atividades agrícolas** em talhões (aplicações, plantio, colheita, etc.)
 - Fazer **monitoramento de pragas (scouting)** com GPS em pontos do talhão

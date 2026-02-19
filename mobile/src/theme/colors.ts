@@ -3,11 +3,11 @@
  * https://ui.ahmedbna.com/docs/installation
  * https://ui.ahmedbna.com/docs/theming
  *
- * Paleta Agritech disponível como cores extras (palette) e ColorKeys para useColor().
+ * Paleta Fox Fieldcore disponível como cores extras (palette) e ColorKeys para useColor().
  */
 
 const lightColors = {
-  // Base colors - Tom creme/bege suave inspirado na paleta Agritech
+  // Base colors - Tom creme/bege suave inspirado na paleta Fox Fieldcore
   background: '#F7F5F0',        // Creme suave (warm off-white)
   foreground: '#1A1A1A',
 
@@ -138,7 +138,7 @@ export { darkColors, lightColors };
 export type ColorKeys = keyof typeof lightColors;
 
 /**
- * Paleta de cores Agritech - cores adicionais para uso quando necessário
+ * Paleta de cores Fox Fieldcore - cores adicionais para uso quando necessário
  * Baseada na tabela de cores oficial
  */
 export const palette = {

@@ -96,7 +96,7 @@ function buildReportData(
       recomendacao,
       boasPraticas: [
         'Monitorar continuamente a área afetada',
-        'Registrar aplicações no sistema AGROV',
+        'Registrar aplicações no sistema Fox Fieldcore',
         'Respeitar intervalo de segurança',
       ],
     };

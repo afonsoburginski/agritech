@@ -95,13 +95,21 @@ export const authService = {
     if (error) throw error;
   },
 
-  async updateProfile(updates: { nome?: string; email?: string }) {
+  async updateProfile(updates: { nome?: string; email?: string; telefone?: string; avatar_url?: string }) {
     if (!supabase) throw new Error('Supabase não configurado');
 
-    const { error } = await supabase.auth.updateUser({
-      data: updates,
-    });
+    const authData: Record<string, string> = {};
+    if (updates.nome !== undefined) {
+      authData.nome = updates.nome;
+      authData.full_name = updates.nome;
+    }
+    if (updates.avatar_url !== undefined) authData.avatar_url = updates.avatar_url;
+    if (updates.telefone !== undefined) authData.telefone = updates.telefone;
 
+    const authUpdates: Parameters<typeof supabase.auth.updateUser>[0] = { data: authData };
+    if (updates.email !== undefined) authUpdates.email = updates.email;
+
+    const { error } = await supabase.auth.updateUser(authUpdates);
     if (error) throw error;
   },
 };

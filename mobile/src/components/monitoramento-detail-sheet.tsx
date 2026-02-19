@@ -4,10 +4,10 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Icon } from '@/components/ui/icon';
-import { Button } from '@/components/ui/button';
 import { useColor } from '@/hooks/useColor';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { palette } from '@/theme/colors';
 import {
   Bug,
@@ -84,6 +84,9 @@ export function MonitoramentoDetailSheet({
   synced,
   onClose,
 }: MonitoramentoDetailSheetProps) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const sheetAccent = isDark ? '#fff' : palette.darkGreen;
   const cardColor = useColor({}, 'card');
   const textColor = useColor({}, 'text');
   const mutedColor = useColor({}, 'textMuted');
@@ -319,9 +322,13 @@ export function MonitoramentoDetailSheet({
       </View>
 
       <View style={styles.detailActions}>
-        <Button variant="outline" onPress={onClose} style={styles.detailCloseButton}>
-          <Text>Fechar</Text>
-        </Button>
+        <TouchableOpacity
+          style={[styles.detailCloseButton, { borderColor: sheetAccent }]}
+          onPress={onClose}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.detailCloseButtonText, { color: sheetAccent }]}>Fechar</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -385,7 +392,14 @@ const styles = StyleSheet.create({
   syncDot: { width: 6, height: 6, borderRadius: 3 },
   syncText: { fontSize: 12, fontWeight: '600' },
   detailActions: { marginTop: 8 },
-  detailCloseButton: { width: '100%' },
+  detailCloseButton: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+  },
+  detailCloseButtonText: { fontSize: 15, fontWeight: '600' },
   pestCountBadge: {
     paddingHorizontal: 8,
     paddingVertical: 2,

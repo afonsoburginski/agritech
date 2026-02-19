@@ -129,15 +129,18 @@ export interface DashboardStats {
 }
 
 /**
- * Hook para atividades do Supabase
+ * Hook para atividades do Supabase (filtrado pela fazenda selecionada)
  */
 export function useSupabaseActivities() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [activities, setActivities] = useState<SupabaseActivity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
+    if (!isSupabaseConfigured() || fazendaId == null) {
+      setActivities([]);
       setIsLoading(false);
       return;
     }
@@ -151,6 +154,7 @@ export function useSupabaseActivities() {
       const { data, error: queryError } = await sb
         .from('atividades')
         .select('*')
+        .eq('fazenda_id', fazendaId)
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
@@ -179,7 +183,7 @@ export function useSupabaseActivities() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fazendaId]);
 
   useEffect(() => {
     load();
@@ -189,15 +193,18 @@ export function useSupabaseActivities() {
 }
 
 /**
- * Hook para scouts do Supabase
+ * Hook para scouts do Supabase (filtrado pela fazenda selecionada)
  */
 export function useSupabaseScouts() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [scouts, setScouts] = useState<SupabaseScout[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
+    if (!isSupabaseConfigured() || fazendaId == null) {
+      setScouts([]);
       setIsLoading(false);
       return;
     }
@@ -211,6 +218,7 @@ export function useSupabaseScouts() {
       const { data, error: queryError } = await sb
         .from('scouts')
         .select('*, talhoes(id, nome, area, cultura_atual, percentual_infestacao), scout_pragas(coordinates)')
+        .eq('fazenda_id', fazendaId)
         .order('created_at', { ascending: false });
 
       if (queryError) {
@@ -253,7 +261,7 @@ export function useSupabaseScouts() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fazendaId]);
 
   useEffect(() => {
     load();
@@ -278,15 +286,18 @@ export function useSupabaseScouts() {
 }
 
 /**
- * Hook para pragas (scout_pragas) do Supabase
+ * Hook para pragas (scout_pragas) do Supabase (filtrado pela fazenda selecionada via scouts)
  */
 export function useSupabasePests() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [pests, setPests] = useState<SupabasePest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
+    if (!isSupabaseConfigured() || fazendaId == null) {
+      setPests([]);
       setIsLoading(false);
       return;
     }
@@ -297,7 +308,8 @@ export function useSupabasePests() {
 
       const { data, error: queryError } = await getSupabase()
         .from('scout_pragas')
-        .select('*, embrapa_recomendacoes(nome_praga, nome_cientifico, tipo, descricao)')
+        .select('*, embrapa_recomendacoes(nome_praga, nome_cientifico, tipo, descricao), scouts!inner(fazenda_id)')
+        .eq('scouts.fazenda_id', fazendaId)
         .order('data_contagem', { ascending: false });
 
       if (queryError) throw queryError;
@@ -325,7 +337,7 @@ export function useSupabasePests() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fazendaId]);
 
   useEffect(() => {
     load();
@@ -373,12 +385,15 @@ export interface ScoutWithPestsSummary {
  * Busca por scout_pragas -> scouts, para não depender de total_pragas em scouts.
  */
 export function useRecentScoutsWithPests(limit = 5) {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [scouts, setScouts] = useState<ScoutWithPestsSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
+    if (!isSupabaseConfigured() || fazendaId == null) {
+      setScouts([]);
       setIsLoading(false);
       return;
     }
@@ -398,14 +413,16 @@ export function useRecentScoutsWithPests(limit = 5) {
           observacao,
           data_contagem,
           embrapa_recomendacoes (nome_praga, nome_cientifico, tipo, descricao),
-          scouts (
+          scouts!inner (
             id,
             nome,
             created_at,
             observacao,
+            fazenda_id,
             talhoes (id, nome, area, cultura_atual, coordinates, percentual_infestacao)
           )
         `)
+        .eq('scouts.fazenda_id', fazendaId)
         .order('data_contagem', { ascending: false })
         .limit(200);
 
@@ -571,7 +588,7 @@ export function useRecentScoutsWithPests(limit = 5) {
     } finally {
       setIsLoading(false);
     }
-  }, [limit]);
+  }, [limit, fazendaId]);
 
   useEffect(() => {
     load();
@@ -746,15 +763,18 @@ export function useSupabaseHeatmap(fazendaId?: number | null) {
 }
 
 /**
- * Hook para talhões do Supabase
+ * Hook para talhões do Supabase (filtrado pela fazenda selecionada)
  */
 export function useSupabasePlots() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [plots, setPlots] = useState<SupabaseTalhao[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      if (!isSupabaseConfigured()) {
+      if (!isSupabaseConfigured() || fazendaId == null) {
+        setPlots([]);
         setIsLoading(false);
         return;
       }
@@ -763,6 +783,7 @@ export function useSupabasePlots() {
         const { data, error } = await getSupabase()
           .from('talhoes')
           .select('id, nome, area, cultura_atual, color')
+          .eq('fazenda_id', fazendaId)
           .order('nome');
 
         if (error) throw error;
@@ -785,7 +806,7 @@ export function useSupabasePlots() {
     };
 
     load();
-  }, []);
+  }, [fazendaId]);
 
   return { plots, isLoading };
 }
@@ -939,9 +960,11 @@ export function usePestsByScout(scoutId: string | number | null) {
 }
 
 /**
- * Hook para estatísticas do dashboard
+ * Hook para estatísticas do dashboard (filtrado pela fazenda selecionada)
  */
 export function useDashboardStats() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [stats, setStats] = useState<DashboardStats>({
     totalActivities: 0,
     pendingActivities: 0,
@@ -956,7 +979,7 @@ export function useDashboardStats() {
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
+    if (!isSupabaseConfigured() || fazendaId == null) {
       setIsLoading(false);
       return;
     }
@@ -964,10 +987,10 @@ export function useDashboardStats() {
     try {
       const sb = getSupabase();
       const [atividadesRes, scoutsRes, pragasRes, talhoesRes] = await Promise.all([
-        sb.from('atividades').select('situacao').is('deleted_at', null),
-        sb.from('scouts').select('status, total_pragas'),
-        sb.from('scout_pragas').select('id'),
-        sb.from('talhoes').select('id'),
+        sb.from('atividades').select('situacao').eq('fazenda_id', fazendaId).is('deleted_at', null),
+        sb.from('scouts').select('status, total_pragas').eq('fazenda_id', fazendaId),
+        sb.from('scout_pragas').select('id, scouts!inner(fazenda_id)').eq('scouts.fazenda_id', fazendaId),
+        sb.from('talhoes').select('id').eq('fazenda_id', fazendaId),
       ]);
 
       const atividades = atividadesRes.data || [];
@@ -992,7 +1015,7 @@ export function useDashboardStats() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fazendaId]);
 
   useEffect(() => {
     load();
@@ -1066,9 +1089,11 @@ export function useFarmHealth(): FarmHealthResult {
 }
 
 /**
- * Hook para atividades por mês (para o gráfico radar)
+ * Hook para atividades por mês (para o gráfico radar) (filtrado pela fazenda selecionada)
  */
 export function useActivitiesByMonth() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [data, setData] = useState<{ label: string; value: number }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -1083,7 +1108,7 @@ export function useActivitiesByMonth() {
 
   useEffect(() => {
     const load = async () => {
-      if (!isSupabaseConfigured()) {
+      if (!isSupabaseConfigured() || fazendaId == null) {
         setData(demoData);
         setIsLoading(false);
         return;
@@ -1095,6 +1120,7 @@ export function useActivitiesByMonth() {
         const { data: atividades, error } = await getSupabase()
           .from('atividades')
           .select('created_at')
+          .eq('fazenda_id', fazendaId)
           .is('deleted_at', null)
           .gte('created_at', `${currentYear}-01-01`)
           .lte('created_at', `${currentYear}-12-31`);
@@ -1130,21 +1156,24 @@ export function useActivitiesByMonth() {
     };
 
     load();
-  }, []);
+  }, [fazendaId]);
 
   return { data, isLoading };
 }
 
 /**
- * Hook para top pragas
+ * Hook para top pragas (filtrado pela fazenda selecionada via scouts)
  */
 export function useTopPests() {
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
   const [pests, setPests] = useState<{ name: string; count: number; prioridade: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      if (!isSupabaseConfigured()) {
+      if (!isSupabaseConfigured() || fazendaId == null) {
+        setPests([]);
         setIsLoading(false);
         return;
       }
@@ -1152,7 +1181,8 @@ export function useTopPests() {
       try {
         const { data, error } = await getSupabase()
           .from('scout_pragas')
-          .select('contagem, prioridade, embrapa_recomendacoes(nome_praga)');
+          .select('contagem, prioridade, embrapa_recomendacoes(nome_praga), scouts!inner(fazenda_id)')
+          .eq('scouts.fazenda_id', fazendaId);
 
         if (error) throw error;
 
@@ -1184,7 +1214,7 @@ export function useTopPests() {
     };
 
     load();
-  }, []);
+  }, [fazendaId]);
 
   return { pests, isLoading };
 }

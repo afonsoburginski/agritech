@@ -1,5 +1,5 @@
 /**
- * Paleta de cores Agritech
+ * Paleta de cores Fox Fieldcore
  * Baseada na tabela de cores oficial:
  * - Dark Green: #0e270a
  * - Olive Green/Brown: #595412
@@ -17,7 +17,7 @@ export const palette = {
   black: '#000000',
 };
 
-// Cores do tema Agritech compatíveis com light/dark mode
+// Cores do tema Fox Fieldcore compatíveis com light/dark mode
 const themeColors = {
   light: {
     // Cores principais da paleta

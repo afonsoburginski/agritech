@@ -176,7 +176,7 @@ export function generateTechnicalReportHTML(data: TechnicalReportData): string {
       <h2>Monitoramento de Pragas e Doenças</h2>
     </div>
     <div class="header-right">
-      <div class="app-name">AGROV</div>
+      <div class="app-name">Fox Fieldcore</div>
       <div>Monitoramento Manual</div>
     </div>
   </div>
@@ -267,7 +267,7 @@ export function generateTechnicalReportHTML(data: TechnicalReportData): string {
   </div>
 
   <div class="footer">
-    <p>AGROV — Relatório gerado automaticamente em ${data.dataRelatorio}</p>
+    <p>Fox Fieldcore — Relatório gerado automaticamente em ${data.dataRelatorio}</p>
   </div>
 </body>
 </html>`;

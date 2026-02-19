@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
         recomendacao: firstEr.descricao ?? undefined,
         boasPraticas: [
           'Monitorar continuamente a área afetada',
-          'Registrar aplicações no sistema AGROV',
+          'Registrar aplicações no sistema Fox Fieldcore',
           'Respeitar intervalo de segurança',
         ],
       };
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
         'Aumentar frequência de inspeções em áreas com reincidência',
         'Revisar condições de irrigação para mitigar propagação',
         'Realizar limpeza de equipamentos entre talhões',
-        'Documentar todas as aplicações realizadas no AGROV',
+        'Documentar todas as aplicações realizadas no Fox Fieldcore',
       ],
       conclusao: allPragas.length === 0
         ? `Monitoramento em ${now.toLocaleDateString('pt-BR')}: nenhum foco crítico detectado em ${fazenda?.nome ?? 'a propriedade'}. Manter calendário regular.`

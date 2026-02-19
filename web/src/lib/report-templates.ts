@@ -87,7 +87,7 @@ export function generateReportHTML(data: ReportData, type: 'technical' | 'pest-d
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Helvetica,Arial,sans-serif;color:#1a1a1a;font-size:11px;line-height:1.5;padding:24px}</style></head><body>
 <div style="border-bottom:3px solid ${accent};padding-bottom:16px;margin-bottom:20px;display:flex;justify-content:space-between;">
   <div><h1 style="font-size:18px;color:${accent}">Relatório Técnico</h1><h2 style="font-size:13px;color:#4b5563;font-weight:400">${subtitle}</h2></div>
-  <div style="text-align:right;font-size:10px;color:#6b7280"><div style="font-size:14px;font-weight:700;color:${accent}">AGROV</div></div>
+  <div style="text-align:right;font-size:10px;color:#6b7280"><div style="font-size:14px;font-weight:700;color:${accent}">Fox Fieldcore</div></div>
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:12px;background:${bgLight};border-radius:8px;">
@@ -141,7 +141,7 @@ ${buildDoencasHTML(data.doencas).replace(/__ACCENT__/g, accent) || '<p style="co
 </table>
 
 <div style="text-align:center;font-size:9px;color:#9ca3af;margin-top:20px;padding-top:8px;border-top:1px solid #e5e7eb">
-  AGROV — Relatório gerado em ${data.dataRelatorio}
+  Fox Fieldcore — Relatório gerado em ${data.dataRelatorio}
 </div>
 </body></html>`;
 
