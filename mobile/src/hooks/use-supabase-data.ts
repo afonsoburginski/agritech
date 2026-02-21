@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '@/services/supabase';
 import { useAuthFazendaPadrao } from '@/stores/auth-store';
+import { useAppStore } from '@/stores/app-store';
 import { logger } from '@/services/logger';
 import type { Database } from '@/types/supabase';
 import type { CulturaTalhaoEnum } from '@/types/supabase';
@@ -114,6 +115,8 @@ export interface SupabaseHeatmapPoint {
   lng: number;
   intensity: number;
   pragaNome?: string;
+  /** ID do talhão do scout (para colocar o ponto dentro do polígono no heatmap) */
+  talhaoId?: number;
 }
 
 export interface DashboardStats {
@@ -189,6 +192,16 @@ export function useSupabaseActivities() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const sb = getSupabase();
+    const channel = sb
+      .channel('atividades-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'atividades' }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load]);
+
   return { activities, isLoading, error, refresh: load };
 }
 
@@ -198,6 +211,7 @@ export function useSupabaseActivities() {
 export function useSupabaseScouts() {
   const fazenda = useAuthFazendaPadrao();
   const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
+  const scoutsRefreshTrigger = useAppStore((s) => s.scoutsRefreshTrigger);
   const [scouts, setScouts] = useState<SupabaseScout[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -267,15 +281,20 @@ export function useSupabaseScouts() {
     load();
   }, [load]);
 
-  // Realtime: quando talhoes.percentual_infestacao é atualizado pelo trigger, refetch para exibir novo valor
+  // Refetch quando um scout foi salvo (ex.: reconhecimento confirmado) para atualizar a tela de monitoramento
+  useEffect(() => {
+    if (scoutsRefreshTrigger > 0) load();
+  }, [scoutsRefreshTrigger, load]);
+
+  // Realtime: scouts, scout_pragas e talhoes
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
     const sb = getSupabase();
     const channel = sb
-      .channel('talhoes-infestacao')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'talhoes' }, () => {
-        load();
-      })
+      .channel('monitoramento-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scouts' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scout_pragas' }, () => load())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'talhoes' }, () => load())
       .subscribe();
     return () => {
       sb.removeChannel(channel);
@@ -318,7 +337,7 @@ export function useSupabasePests() {
       const mapped: SupabasePest[] = (data || []).map((row: any) => ({
         id: row.id,
         scoutId: row.scout_id,
-        pragaNome: er(row).nome_praga ?? 'Desconhecida',
+        pragaNome: row.praga_nome ?? er(row).nome_praga ?? 'Desconhecida',
         pragaNomeCientifico: er(row).nome_cientifico ?? undefined,
         tipoPraga: row.tipo_praga ?? er(row).tipo ?? undefined,
         contagem: row.contagem,
@@ -326,7 +345,7 @@ export function useSupabasePests() {
         prioridade: row.prioridade,
         observacao: row.observacao,
         dataContagem: row.data_contagem,
-        recomendacao: er(row).descricao ?? undefined,
+        recomendacao: row.recomendacao ?? er(row).descricao ?? undefined,
       }));
 
       setPests(mapped);
@@ -412,6 +431,8 @@ export function useRecentScoutsWithPests(limit = 5) {
           prioridade,
           observacao,
           data_contagem,
+          praga_nome,
+          recomendacao,
           embrapa_recomendacoes (nome_praga, nome_cientifico, tipo, descricao),
           scouts!inner (
             id,
@@ -439,6 +460,8 @@ export function useRecentScoutsWithPests(limit = 5) {
         contagem?: number | null;
         prioridade?: string | null;
         observacao?: string | null;
+        praga_nome?: string | null;
+        recomendacao?: string | null;
         embrapa_recomendacoes?: EmbrapaRow | EmbrapaRow[];
         scouts?: {
           id: number;
@@ -499,7 +522,7 @@ export function useRecentScoutsWithPests(limit = 5) {
 
         const contagem = row.contagem ?? 1;
         const embrapa = Array.isArray(row.embrapa_recomendacoes) ? row.embrapa_recomendacoes[0] : row.embrapa_recomendacoes;
-        const pragaNome = embrapa?.nome_praga ?? 'Praga';
+        const pragaNome = row.praga_nome ?? embrapa?.nome_praga ?? 'Praga';
 
         let cur = byTalhaoKey.get(key);
         if (!cur) {
@@ -525,7 +548,7 @@ export function useRecentScoutsWithPests(limit = 5) {
             pragaNomeCientifico: embrapa?.nome_cientifico ?? undefined,
             tipoPraga: row.tipo_praga ?? embrapa?.tipo ?? undefined,
             observacao: row.observacao ?? undefined,
-            recomendacao: embrapa?.descricao ?? undefined,
+            recomendacao: row.recomendacao ?? embrapa?.descricao ?? undefined,
           });
         } else {
           existing.contagem += contagem;
@@ -535,7 +558,7 @@ export function useRecentScoutsWithPests(limit = 5) {
           if (embrapa?.nome_cientifico && !existing.pragaNomeCientifico) existing.pragaNomeCientifico = embrapa.nome_cientifico;
           if ((row.tipo_praga ?? embrapa?.tipo) && !existing.tipoPraga) existing.tipoPraga = row.tipo_praga ?? embrapa?.tipo;
           if (row.observacao && !existing.observacao) existing.observacao = row.observacao;
-          if (embrapa?.descricao && !existing.recomendacao) existing.recomendacao = embrapa.descricao;
+          if ((row.recomendacao ?? embrapa?.descricao) && !existing.recomendacao) existing.recomendacao = row.recomendacao ?? embrapa?.descricao ?? undefined;
         }
         if (scout.created_at > cur.latestCreatedAt) {
           cur.latestCreatedAt = scout.created_at;
@@ -592,6 +615,17 @@ export function useRecentScoutsWithPests(limit = 5) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const sb = getSupabase();
+    const channel = sb
+      .channel('recent-scouts-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scouts' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scout_pragas' }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
   }, [load]);
 
   return { scouts, isLoading, error, refresh: load };
@@ -700,66 +734,83 @@ export async function fetchTalhaoMonitoramentoDetail(
  * Se fazendaId for informado, retorna apenas pragas dos scouts dessa fazenda.
  */
 export function useSupabaseHeatmap(fazendaId?: number | null) {
+  const scoutsRefreshTrigger = useAppStore((s) => s.scoutsRefreshTrigger);
   const [points, setPoints] = useState<SupabaseHeatmapPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  const load = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const sb = getSupabase();
+
+      const { data: pragas, error: pragasError } = fazendaId != null
+        ? await sb
+            .from('scout_pragas')
+            .select('id, coordinates, contagem, praga_nome, embrapa_recomendacoes(nome_praga), scouts!inner(fazenda_id, talhao_id)')
+            .eq('scouts.fazenda_id', fazendaId)
+        : await sb
+            .from('scout_pragas')
+            .select('id, coordinates, contagem, praga_nome, embrapa_recomendacoes(nome_praga), scouts(talhao_id)');
+
+      if (pragasError) throw pragasError;
+
+      const mapped: SupabaseHeatmapPoint[] = (pragas || [])
+        .map((p: any) => {
+          const point = pointFromCoordinates(p.coordinates);
+          if (!point) return null;
+          const er = p.embrapa_recomendacoes ?? {};
+          const scout = p.scouts;
+          const talhaoId = scout?.talhao_id ?? undefined;
+          const contagem = p.contagem || 1;
+          const intensity = contagem <= 0
+            ? 0.05
+            : Math.min(1, 1 - Math.exp(-contagem / 4));
+          return {
+            lat: point.lat,
+            lng: point.lng,
+            intensity,
+            pragaNome: p.praga_nome ?? er.nome_praga ?? 'Desconhecida',
+            talhaoId: talhaoId != null ? Number(talhaoId) : undefined,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x != null);
+
+      setPoints(mapped);
+      logger.info('Heatmap carregado do Supabase', { count: mapped.length, fazendaId });
+    } catch (err: any) {
+      logger.error('Erro ao carregar heatmap do Supabase', { error: err.message });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fazendaId]);
 
   useEffect(() => {
-    const load = async () => {
-      if (!isSupabaseConfigured()) {
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const sb = getSupabase();
-
-        const { data: pragas, error: pragasError } = fazendaId != null
-          ? await sb
-              .from('scout_pragas')
-              .select('id, coordinates, contagem, embrapa_recomendacoes(nome_praga), scouts!inner(fazenda_id)')
-              .eq('scouts.fazenda_id', fazendaId)
-          : await sb
-              .from('scout_pragas')
-              .select('id, coordinates, contagem, embrapa_recomendacoes(nome_praga)');
-
-        if (pragasError) throw pragasError;
-
-        const mapped: SupabaseHeatmapPoint[] = (pragas || [])
-          .map((p: any) => {
-            const point = pointFromCoordinates(p.coordinates);
-            if (!point) return null;
-            const er = p.embrapa_recomendacoes ?? {};
-            const contagem = p.contagem || 1;
-            const intensity = contagem <= 0
-              ? 0.05
-              : Math.min(1, 1 - Math.exp(-contagem / 4));
-            return {
-              lat: point.lat,
-              lng: point.lng,
-              intensity,
-              pragaNome: er.nome_praga ?? 'Desconhecida',
-            };
-          })
-          .filter((x): x is NonNullable<typeof x> => x != null);
-
-        setPoints(mapped);
-        logger.info('Heatmap carregado do Supabase', { count: mapped.length, fazendaId });
-      } catch (err: any) {
-        logger.error('Erro ao carregar heatmap do Supabase', { error: err.message });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     load();
-  }, [fazendaId, refetchTrigger]);
+  }, [load]);
 
-  const refetch = useCallback(() => {
-    setRefetchTrigger((v) => v + 1);
-  }, []);
+  useEffect(() => {
+    if (scoutsRefreshTrigger > 0) load();
+  }, [scoutsRefreshTrigger, load]);
 
-  return { points, isLoading, hasData: points.length > 0, refetch };
+  // Realtime: atualizar heatmap quando scout_pragas ou scouts mudam
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const sb = getSupabase();
+    const channel = sb
+      .channel('heatmap-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scout_pragas' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scouts' }, () => load())
+      .subscribe();
+    return () => {
+      sb.removeChannel(channel);
+    };
+  }, [load]);
+
+  return { points, isLoading, hasData: points.length > 0, refetch: load };
 }
 
 /**
@@ -917,7 +968,7 @@ export async function fetchPestsByScoutId(scoutId: string | number | null): Prom
     return (data || []).map((p: any) => ({
       id: p.id,
       scoutId: p.scout_id,
-      pragaNome: er(p).nome_praga ?? 'Desconhecida',
+      pragaNome: p.praga_nome ?? er(p).nome_praga ?? 'Desconhecida',
       pragaNomeCientifico: er(p).nome_cientifico ?? undefined,
       tipoPraga: p.tipo_praga ?? er(p).tipo ?? undefined,
       contagem: p.contagem || 0,
@@ -925,7 +976,7 @@ export async function fetchPestsByScoutId(scoutId: string | number | null): Prom
       prioridade: p.prioridade,
       observacao: p.observacao,
       dataContagem: p.data_contagem,
-      recomendacao: er(p).descricao ?? undefined,
+      recomendacao: p.recomendacao ?? er(p).descricao ?? undefined,
     }));
   } catch (err: any) {
     logger.error('Erro ao buscar pragas do scout', { error: err.message });
@@ -1021,6 +1072,18 @@ export function useDashboardStats() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const sb = getSupabase();
+    const channel = sb
+      .channel('dashboard-stats-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scouts' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scout_pragas' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'atividades' }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load]);
+
   return { stats, isLoading, refresh: load };
 }
 
@@ -1078,6 +1141,16 @@ export function useFarmHealth(): FarmHealthResult {
   useEffect(() => {
     setIsLoading(true);
     load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const sb = getSupabase();
+    const channel = sb
+      .channel('farm-health-realtime')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'fazendas' }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
   }, [load]);
 
   return {
@@ -1170,51 +1243,60 @@ export function useTopPests() {
   const [pests, setPests] = useState<{ name: string; count: number; prioridade: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      if (!isSupabaseConfigured() || fazendaId == null) {
-        setPests([]);
-        setIsLoading(false);
-        return;
-      }
+  const load = useCallback(async () => {
+    if (!isSupabaseConfigured() || fazendaId == null) {
+      setPests([]);
+      setIsLoading(false);
+      return;
+    }
 
-      try {
-        const { data, error } = await getSupabase()
-          .from('scout_pragas')
-          .select('contagem, prioridade, embrapa_recomendacoes(nome_praga), scouts!inner(fazenda_id)')
-          .eq('scouts.fazenda_id', fazendaId);
+    try {
+      const { data, error } = await getSupabase()
+        .from('scout_pragas')
+        .select('contagem, prioridade, praga_nome, embrapa_recomendacoes(nome_praga), scouts!inner(fazenda_id)')
+        .eq('scouts.fazenda_id', fazendaId);
 
-        if (error) throw error;
+      if (error) throw error;
 
-        const grouped: Record<string, { count: number; prioridade: string }> = {};
-        (data || []).forEach((p: any) => {
-          const nome = (p.embrapa_recomendacoes?.nome_praga ?? 'Desconhecida') || 'Desconhecida';
-          if (!grouped[nome]) {
-            grouped[nome] = { count: 0, prioridade: p.prioridade || 'BAIXA' };
-          }
-          grouped[nome].count += p.contagem || 1;
-          if (p.prioridade === 'ALTA' ||
-            (p.prioridade === 'MEDIA' && grouped[nome].prioridade === 'BAIXA')) {
-            grouped[nome].prioridade = p.prioridade;
-          }
-        });
+      const grouped: Record<string, { count: number; prioridade: string }> = {};
+      (data || []).forEach((p: any) => {
+        const nome = p.praga_nome || p.embrapa_recomendacoes?.nome_praga || 'Desconhecida';
+        if (!grouped[nome]) {
+          grouped[nome] = { count: 0, prioridade: p.prioridade || 'BAIXA' };
+        }
+        grouped[nome].count += p.contagem || 1;
+        if (p.prioridade === 'ALTA' ||
+          (p.prioridade === 'MEDIA' && grouped[nome].prioridade === 'BAIXA')) {
+          grouped[nome].prioridade = p.prioridade;
+        }
+      });
 
-        const result = Object.entries(grouped)
-          .map(([name, d]) => ({ name, ...d }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 5);
+      const result = Object.entries(grouped)
+        .map(([name, d]) => ({ name, ...d }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
 
-        setPests(result);
-        logger.info('Top pragas carregadas', { count: result.length });
-      } catch (err: any) {
-        logger.error('Erro ao carregar top pragas', { error: err.message });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    load();
+      setPests(result);
+    } catch (err: any) {
+      logger.error('Erro ao carregar top pragas', { error: err.message });
+    } finally {
+      setIsLoading(false);
+    }
   }, [fazendaId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    const sb = getSupabase();
+    const channel = sb
+      .channel('top-pests-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scout_pragas' }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load]);
 
   return { pests, isLoading };
 }

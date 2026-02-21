@@ -96,13 +96,16 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         set({
           session,
           user: session.user,
-          isLoading: false,
         });
 
-        // Load profile data after setting session
         if (session.user) {
-          setTimeout(() => get().loadProfile(), 0);
+          try {
+            await get().loadProfile();
+          } catch (e) {
+            logger.warn('Erro ao carregar perfil no initialize', { error: e });
+          }
         }
+        set({ isLoading: false });
       }
     );
 
@@ -142,8 +145,16 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         throw new Error(message);
       }
 
-      // Session is handled by onAuthStateChange
+      // Atualiza estado imediatamente para o layout redirecionar (não depender só do onAuthStateChange)
+      set({
+        session: data.session,
+        user: data.user ?? null,
+        isLoading: false,
+      });
       logger.info('Sign in successful', { userId: data.user?.id });
+
+      // Carrega perfil e fazendas para definir pendingFazendaChoice antes do redirecionamento
+      await get().loadProfile();
     } catch (error: any) {
       const errorMessage = error.message || 'Erro ao fazer login';
       set({ isLoading: false, error: errorMessage });

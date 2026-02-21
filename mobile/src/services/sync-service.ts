@@ -39,7 +39,7 @@ const REVERSE_TABLE_MAP: Record<string, EntityType> = {
 
 class SyncService {
   private isSyncing: boolean = false;
-  private syncInterval: NodeJS.Timeout | null = null;
+  private syncInterval: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Inicia o serviço de sincronização
@@ -220,26 +220,41 @@ class SyncService {
       let error: any = null;
 
       switch (item.operation) {
-        case 'create':
+        case 'create': {
+          const snaked = this.toSnakeCase(payload);
+          if (item.entityType === 'scouts') {
+            // scouts.id is auto-generated bigint; remove local string id and lat/lng (not DB columns)
+            delete snaked.id;
+            delete snaked.latitude;
+            delete snaked.longitude;
+            delete snaked.accuracy;
+            delete snaked.altitude;
+          }
+          if (item.entityType === 'pragas') {
+            delete snaked.id;
+          }
           const { error: createError } = await supabase
             .from(supabaseTable)
-            .insert(this.toSnakeCase(payload) as any);
+            .insert(snaked as any);
           error = createError;
           break;
-        case 'update':
+        }
+        case 'update': {
           const { error: updateError } = await supabase
             .from(supabaseTable)
             .update(this.toSnakeCase(payload) as any)
             .eq('id', item.entityId);
           error = updateError;
           break;
-        case 'delete':
+        }
+        case 'delete': {
           const { error: deleteError } = await supabase
             .from(supabaseTable)
             .delete()
             .eq('id', item.entityId);
           error = deleteError;
           break;
+        }
       }
 
       if (error) throw error;

@@ -92,15 +92,22 @@ export function MonitoramentoDetailSheet({
   const mutedColor = useColor({}, 'textMuted');
   const borderColor = useColor({}, 'border');
   const primaryColor = useColor({}, 'primary');
+  const backgroundColor = useColor({}, 'background');
+  const statusCardBg = mutedColor + '22';
+  const severityNeutralBg = mutedColor + '30';
+  const syncNeutralBg = mutedColor + '25';
+  const syncNeutralDot = mutedColor;
+  const successGreen = '#10B981';
+  const warningAmber = '#F59E0B';
 
   const showLocation = latitude != null && longitude != null && (latitude !== 0 || longitude !== 0);
   const isScout = visitado !== undefined;
 
   return (
-    <View style={styles.detailContainer}>
+    <View style={[styles.detailContainer, { backgroundColor }]}>
       {/* Card topo: sempre "Resumo" (do ponto ou do talhão), nunca Visitado/Pendente */}
-      <View style={[styles.detailStatusCard, { backgroundColor: '#6B728015' }]}>
-        <Icon name={MapPin} size={24} color="#6B7280" />
+      <View style={[styles.detailStatusCard, { backgroundColor: statusCardBg }]}>
+        <Icon name={MapPin} size={24} color={mutedColor} />
         <View style={styles.detailStatusInfo}>
           <Text style={[styles.detailStatusLabel, { color: mutedColor }]}>
             {isScout ? 'Resumo do ponto' : 'Resumo do talhão'}
@@ -139,7 +146,7 @@ export function MonitoramentoDetailSheet({
           {percentualInfestacao != null && (
             <View style={styles.detailCoordRow}>
               <Text style={[styles.detailCoordLabel, { color: mutedColor }]}>Infestação (mês atual)</Text>
-              <Text style={[styles.detailCoordValue, { color: percentualInfestacao > 0 ? '#F59E0B' : textColor, fontWeight: percentualInfestacao > 0 ? '600' : '400' }]}>
+              <Text style={[styles.detailCoordValue, { color: percentualInfestacao > 0 ? warningAmber : textColor, fontWeight: percentualInfestacao > 0 ? '600' : '400' }]}>
                 {Number(percentualInfestacao).toFixed(1)}%
               </Text>
             </View>
@@ -180,13 +187,13 @@ export function MonitoramentoDetailSheet({
       {/* Pragas */}
       <View style={[styles.detailSection, { borderColor }]}>
         <View style={styles.detailSectionHeader}>
-          <Icon name={Bug} size={16} color={palette.gold} />
+          <Icon name={Bug} size={16} color={primaryColor} />
           <Text style={[styles.detailSectionTitle, { color: textColor }]}>
             Pragas Identificadas
           </Text>
           {pragas.length > 0 && (
-            <View style={[styles.pestCountBadge, { backgroundColor: palette.gold + '20' }]}>
-              <Text style={[styles.pestCountText, { color: palette.gold }]}>{pragas.length}</Text>
+            <View style={[styles.pestCountBadge, { backgroundColor: primaryColor + '25' }]}>
+              <Text style={[styles.pestCountText, { color: primaryColor }]}>{pragas.length}</Text>
             </View>
           )}
         </View>
@@ -212,7 +219,7 @@ export function MonitoramentoDetailSheet({
                       {
                         backgroundColor: pest.prioridade != null
                           ? getSeverityColor(pest.prioridade.toLowerCase()) + '20'
-                          : '#6B728020',
+                          : severityNeutralBg,
                       },
                     ]}>
                       <Text style={[
@@ -256,7 +263,7 @@ export function MonitoramentoDetailSheet({
                 {pest.recomendacao && pest.recomendacao.trim() !== '' && (
                   <View style={[styles.embrapaSection, { borderColor }]}>
                     <View style={styles.embrapaSectionHeader}>
-                      <Icon name={FlaskConical} size={13} color="#16A34A" />
+                      <Icon name={FlaskConical} size={13} color={successGreen} />
                       <Text style={[styles.embrapaSectionTitle, { color: textColor }]}>
                         Recomendação
                       </Text>
@@ -270,9 +277,9 @@ export function MonitoramentoDetailSheet({
             ))}
           </View>
         ) : (
-          <View style={[styles.noPragasCard, { backgroundColor: '#10B98115' }]}>
-            <Icon name={CheckCircle} size={18} color="#10B981" />
-            <Text style={[styles.noPragasText, { color: '#10B981' }]}>
+          <View style={[styles.noPragasCard, { backgroundColor: successGreen + '20' }]}>
+            <Icon name={CheckCircle} size={18} color={successGreen} />
+            <Text style={[styles.noPragasText, { color: successGreen }]}>
               Nenhuma praga identificada
             </Text>
           </View>
@@ -296,20 +303,20 @@ export function MonitoramentoDetailSheet({
           styles.syncBadge,
           {
             backgroundColor:
-              synced === true ? '#10B98120' : synced === false ? '#F59E0B20' : '#6B728020',
+              synced === true ? successGreen + '25' : synced === false ? warningAmber + '25' : syncNeutralBg,
           },
         ]}>
           <View style={[
             styles.syncDot,
             {
               backgroundColor:
-                synced === true ? '#10B981' : synced === false ? '#F59E0B' : '#6B7280',
+                synced === true ? successGreen : synced === false ? warningAmber : syncNeutralDot,
             },
           ]} />
           <Text style={[
             styles.syncText,
             {
-              color: synced === true ? '#10B981' : synced === false ? '#F59E0B' : mutedColor,
+              color: synced === true ? successGreen : synced === false ? warningAmber : mutedColor,
             },
           ]}>
             {synced === true

@@ -1,15 +1,14 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { StyleSheet, TouchableOpacity, TextInput, Alert, SectionList } from 'react-native';
+import { StyleSheet, TouchableOpacity, TextInput, SectionList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { AppHeader } from '@/components/app-header';
-import { BottomSheet, useBottomSheet } from '@/components/ui/bottom-sheet-simple';
+import { BottomSheet } from '@/components/ui/bottom-sheet-simple';
 import { MonitoramentoDetailSheet, type MonitoramentoDetailPraga } from '@/components/monitoramento-detail-sheet';
 import { useScouts } from '@/hooks/use-scouts';
 import { useSupabaseScouts, fetchTalhaoMonitoramentoDetail } from '@/hooks/use-supabase-data';
-import { useLocation } from '@/hooks/use-location';
 import { useColor } from '@/hooks/useColor';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Icon } from '@/components/ui/icon';
@@ -19,7 +18,6 @@ import { useEffectiveAvatarUri } from '@/stores/auth-store';
 import {
   Bug,
   Search,
-  Plus,
   MapPin,
   Calendar,
   AlertTriangle,
@@ -99,17 +97,9 @@ export default function MonitoramentoScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const sheetAccent = isDark ? '#fff' : palette.darkGreen;
-  const sheetConfirmStyle = isDark
-    ? { backgroundColor: 'rgba(255,255,255,0.2)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)' }
-    : { backgroundColor: palette.darkGreen + '20', borderWidth: 1, borderColor: palette.darkGreen };
-  const sheetConfirmTextColor = isDark ? '#fff' : palette.darkGreen;
-
   const { isOnline } = useAppStore();
-  const { scouts: localScouts, create, refresh } = useScouts();
+  const { scouts: localScouts, refresh } = useScouts();
   const { scouts: supabaseScouts, isLoading, refresh: refreshSupabase } = useSupabaseScouts();
-  const { location, captureLocation } = useLocation();
-  const { isVisible, open, close } = useBottomSheet();
   const [detailSheetVisible, setDetailSheetVisible] = useState(false);
   const [detailPayload, setDetailPayload] = useState<{
     title: string;
@@ -125,8 +115,6 @@ export default function MonitoramentoScreen() {
     observacoes?: string;
     synced: boolean;
   } | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
   useFocusEffect(
     useCallback(() => {
       refreshSupabase();
@@ -309,41 +297,6 @@ export default function MonitoramentoScreen() {
 
   const handlePerfil = () => router.push('/(tabs)/perfil');
 
-  const handleNovo = async () => {
-    try {
-      await captureLocation();
-      if (!location) {
-        Alert.alert('Aguarde', 'Obtendo localização...');
-        return;
-      }
-      open();
-    } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Erro ao obter localização');
-    }
-  };
-
-  const handleSubmit = async () => {
-    if (!location) {
-      Alert.alert('Erro', 'Localização não disponível');
-      return;
-    }
-    try {
-      setIsSubmitting(true);
-      await create({
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracy: location.accuracy,
-      });
-      close();
-      refresh();
-      Alert.alert('Sucesso', 'Ponto de monitoramento criado!');
-    } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Erro ao criar ponto');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const renderTrendBadge = (trend: number | null) => {
     if (trend == null) return null;
     if (trend === 0) {
@@ -397,7 +350,6 @@ export default function MonitoramentoScreen() {
         </View>
       </View>
 
-      {/* Search + Novo */}
       <View style={styles.searchSection}>
         <View style={[styles.searchContainer, { backgroundColor: cardColor, borderColor }]}>
           <Icon name={Search} size={18} color={mutedColor} />
@@ -409,14 +361,6 @@ export default function MonitoramentoScreen() {
             onChangeText={setSearchQuery}
           />
         </View>
-        <TouchableOpacity
-          style={[styles.addButton, { borderColor: primaryColor }]}
-          activeOpacity={0.7}
-          onPress={handleNovo}
-        >
-          <Icon name={Plus} size={16} color={primaryColor} />
-          <Text style={[styles.addButtonText, { color: primaryColor }]}>Novo</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Monthly sections */}
@@ -493,46 +437,6 @@ export default function MonitoramentoScreen() {
           </TouchableOpacity>
         )}
       />
-
-      <BottomSheet isVisible={isVisible} onClose={close} title="Novo Ponto de Monitoramento">
-        <View style={styles.formContainer}>
-          {location && (
-            <View style={[styles.locationCard, { backgroundColor: cardColor }]}>
-              <Icon name={MapPin} size={20} color={primaryColor} />
-              <View style={styles.locationInfo}>
-                <Text style={[styles.locationLabel, { color: mutedColor }]}>Localização atual</Text>
-                <Text style={[styles.locationCoords, { color: textColor }]}>
-                  {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
-                </Text>
-                {location.accuracy && (
-                  <Text style={[styles.locationAccuracy, { color: mutedColor }]}>
-                    Precisão: ±{Math.round(location.accuracy)}m
-                  </Text>
-                )}
-              </View>
-            </View>
-          )}
-          <View style={styles.formActions}>
-            <TouchableOpacity
-              style={[styles.sheetCancelBtn, { borderColor: sheetAccent }]}
-              onPress={close}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.sheetCancelText, { color: sheetAccent }]}>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.sheetConfirmBtn, sheetConfirmStyle, (!location || isSubmitting) && { opacity: 0.5 }]}
-              onPress={handleSubmit}
-              activeOpacity={0.7}
-              disabled={isSubmitting || !location}
-            >
-              <Text style={[styles.sheetConfirmText, { color: sheetConfirmTextColor }]}>
-                {isSubmitting ? 'Salvando...' : 'Criar'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </BottomSheet>
 
       {detailPayload != null && (
         <BottomSheet
@@ -616,16 +520,6 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   searchInput: { flex: 1, fontSize: 15 },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 4,
-  },
-  addButtonText: { fontSize: 13, fontWeight: '600' },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
   sectionHeader: {
     flexDirection: 'row',
@@ -706,32 +600,4 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 17, fontWeight: '600', marginBottom: 6 },
   emptySubtitle: { fontSize: 14 },
-  formContainer: { gap: 20 },
-  locationCard: {
-    flexDirection: 'row',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
-    alignItems: 'flex-start',
-  },
-  locationInfo: { flex: 1, gap: 4 },
-  locationLabel: { fontSize: 12 },
-  locationCoords: { fontSize: 14, fontWeight: '600', fontFamily: 'monospace' },
-  locationAccuracy: { fontSize: 11 },
-  formActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  sheetCancelBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    alignItems: 'center',
-  },
-  sheetCancelText: { fontSize: 15, fontWeight: '600' },
-  sheetConfirmBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  sheetConfirmText: { fontSize: 15, fontWeight: '600' },
 });

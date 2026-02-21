@@ -118,22 +118,36 @@ export async function callIdentifyPestEdgeFunction(
 
   const url = `${supabaseUrl}/functions/v1/identify-pest`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${supabaseAnonKey}`,
-      'apikey': supabaseAnonKey,
-    },
-    body: JSON.stringify({
-      imageBase64,
-      fazendaId: metadata?.fazendaId,
-      talhaoId: metadata?.talhaoId,
-      latitude: metadata?.latitude,
-      longitude: metadata?.longitude,
-      cultura: metadata?.cultura,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'apikey': supabaseAnonKey,
+      },
+      body: JSON.stringify({
+        imageBase64,
+        fazendaId: metadata?.fazendaId,
+        talhaoId: metadata?.talhaoId,
+        latitude: metadata?.latitude,
+        longitude: metadata?.longitude,
+        cultura: metadata?.cultura,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('A análise demorou demais. Tente novamente com uma imagem menor ou verifique sua conexão.');
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const errorText = await response.text();

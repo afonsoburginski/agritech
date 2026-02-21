@@ -4,7 +4,7 @@
  * Localização: Região rural próxima a Sinop, Mato Grosso
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -26,7 +26,7 @@ interface HeatmapProps {
 }
 
 /** Centro do mapa: centróide dos pontos ou do primeiro polígono, ou fallback fixo */
-function computeCenter(
+export function computeCenter(
   points: { lat: number; lng: number }[],
   talhoes: { coords: number[][] }[]
 ): { lat: number; lng: number } {
@@ -135,6 +135,68 @@ function pointInPolygon(lat: number, lng: number, coords: number[][]): boolean {
     if (((lngI > lng) !== (lngJ > lng)) && (lat < (latJ - latI) * (lng - lngI) / (lngJ - lngI) + latI)) inside = !inside;
   }
   return inside;
+}
+
+/** Centróide do polígono. coords: array de [lat, lng]. */
+function polygonCentroid(coords: number[][]): { lat: number; lng: number } {
+  if (!coords.length) return { lat: 0, lng: 0 };
+  const sumLat = coords.reduce((s, c) => s + c[0], 0);
+  const sumLng = coords.reduce((s, c) => s + c[1], 0);
+  return { lat: sumLat / coords.length, lng: sumLng / coords.length };
+}
+
+/** Raio seguro (em graus) para manter pontos dentro do polígono (~35% do menor lado do bbox). */
+function polygonSafeRadius(coords: number[][]): number {
+  if (coords.length < 2) return 0.0002;
+  const lats = coords.map((c) => c[0]);
+  const lngs = coords.map((c) => c[1]);
+  const spanLat = Math.max(...lats) - Math.min(...lats);
+  const spanLng = Math.max(...lngs) - Math.min(...lngs);
+  return Math.min(spanLat, spanLng) * 0.35;
+}
+
+/**
+ * Espalha todos os pontos dentro do layer do talhão respectivo.
+ * Agrupa por talhaoId e coloca cada ponto em posições distintas em círculo no interior do polígono.
+ */
+export function spreadPointsInsideTalhoes(
+  points: { lat: number; lng: number; intensity: number; pragaNome?: string; talhaoId?: number }[],
+  talhoes: { id: number; nome: string; coords: number[][] }[]
+): { lat: number; lng: number; intensity: number; pragaNome?: string }[] {
+  const byId = new Map(talhoes.map((t) => [t.id, t]));
+
+  const withTalhao = points.filter((p) => p.talhaoId != null);
+  const withoutTalhao = points.filter((p) => p.talhaoId == null);
+
+  const byTalhao = new Map<number, typeof points>();
+  for (const p of withTalhao) {
+    const id = p.talhaoId!;
+    if (!byTalhao.has(id)) byTalhao.set(id, []);
+    byTalhao.get(id)!.push(p);
+  }
+
+  const result: { lat: number; lng: number; intensity: number; pragaNome?: string }[] = [...withoutTalhao.map((p) => ({ lat: p.lat, lng: p.lng, intensity: p.intensity, pragaNome: p.pragaNome }))];
+
+  for (const [talhaoId, group] of byTalhao) {
+    const talhao = byId.get(talhaoId);
+    if (!talhao || talhao.coords.length < 3) {
+      group.forEach((p) => result.push({ lat: p.lat, lng: p.lng, intensity: p.intensity, pragaNome: p.pragaNome }));
+      continue;
+    }
+
+    const centroid = polygonCentroid(talhao.coords);
+    const radius = polygonSafeRadius(talhao.coords);
+    const n = group.length;
+
+    group.forEach((p, i) => {
+      const angle = (2 * Math.PI * i) / n;
+      const lat = centroid.lat + radius * Math.cos(angle);
+      const lng = centroid.lng + radius * Math.sin(angle);
+      result.push({ lat, lng, intensity: p.intensity, pragaNome: p.pragaNome });
+    });
+  }
+
+  return result;
 }
 
 /** Intensidade média de incidência de pragas dentro do talhão (0 se nenhum ponto). */
@@ -322,25 +384,31 @@ function getHeatmapHTML(
       const heatData = ${heatData};
 
       // Heatmap de população: pouca identificação = azul (baixo), muita = vermelho (alto)
-      const heat = L.heatLayer(heatData, {
+      var heatGradient = {
+        0.0: 'rgba(0, 0, 255, 0.8)',
+        0.08: 'rgba(0, 80, 255, 0.75)',
+        0.18: 'rgba(0, 180, 255, 0.72)',
+        0.32: 'rgba(0, 255, 180, 0.75)',
+        0.48: 'rgba(0, 255, 0, 0.8)',
+        0.62: 'rgba(200, 255, 0, 0.82)',
+        0.75: 'rgba(255, 200, 0, 0.85)',
+        0.86: 'rgba(255, 120, 0, 0.9)',
+        0.94: 'rgba(255, 50, 0, 0.95)',
+        1.0: 'rgba(255, 0, 0, 1.0)'
+      };
+      var heat = L.heatLayer(heatData, {
         radius: 65,
         blur: 50,
         maxZoom: 18,
         max: 1.0,
         minOpacity: 0.7,
-        gradient: {
-          0.0: 'rgba(0, 0, 255, 0.8)',
-          0.08: 'rgba(0, 80, 255, 0.75)',
-          0.18: 'rgba(0, 180, 255, 0.72)',
-          0.32: 'rgba(0, 255, 180, 0.75)',
-          0.48: 'rgba(0, 255, 0, 0.8)',
-          0.62: 'rgba(200, 255, 0, 0.82)',
-          0.75: 'rgba(255, 200, 0, 0.85)',
-          0.86: 'rgba(255, 120, 0, 0.9)',
-          0.94: 'rgba(255, 50, 0, 0.95)',
-          1.0: 'rgba(255, 0, 0, 1.0)'
-        }
+        gradient: heatGradient
       }).addTo(map);
+
+      // Permite atualizar os dados do heatmap via injectJavaScript do React Native
+      window.updateHeatData = function(newData) {
+        heat.setLatLngs(newData);
+      };
 
     } catch (error) {
       console.error('Error:', error);
@@ -354,7 +422,9 @@ function getHeatmapHTML(
 
 export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite' }: HeatmapProps) {
   const [loading, setLoading] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const webViewRef = useRef<WebView>(null);
   const cardColor = useColor({}, 'card');
   const mutedColor = useColor({}, 'textMuted');
 
@@ -363,11 +433,14 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
   const { points: heatPoints, isLoading: loadingHeat, refetch: refetchHeat } = useSupabaseHeatmap(fazendaId);
   const { talhoes: talhoesFromApi, isLoading: loadingTalhoes, refetch: refetchTalhoes } = useSupabaseTalhoesForMap(fazendaId);
 
-  const heatData = useMemo(() => heatPoints, [heatPoints]);
+  const heatData = useMemo(
+    () => spreadPointsInsideTalhoes(heatPoints, talhoesFromApi),
+    [heatPoints, talhoesFromApi]
+  );
   const talhoesData = useMemo(() => talhoesFromApi, [talhoesFromApi]);
   const center = useMemo(
-    () => computeCenter(heatPoints, talhoesFromApi),
-    [heatPoints, talhoesFromApi]
+    () => computeCenter(heatData, talhoesFromApi),
+    [heatData, talhoesFromApi]
   );
 
   useFocusEffect(
@@ -383,13 +456,18 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
     [heatData, talhoesData, center, mapTypeProp]
   );
 
+  // Quando dados mudam e o mapa já está carregado, injeta os novos pontos sem recriar o WebView
   useEffect(() => {
-    logger.info('Heatmap inicializado', {
-      points: heatData.length,
-      talhoes: talhoesData.length,
-      fromApi: heatPoints.length > 0 || talhoesFromApi.length > 0,
-    });
-  }, [heatData.length, talhoesData.length, heatPoints.length, talhoesFromApi.length]);
+    if (!mapReady || !webViewRef.current) return;
+    const newData = JSON.stringify(heatData.map((d) => [d.lat, d.lng, d.intensity]));
+    webViewRef.current.injectJavaScript(`
+      if (window.updateHeatData) {
+        window.updateHeatData(${newData});
+      }
+      true;
+    `);
+    logger.info('Heatmap atualizado via realtime', { points: heatData.length });
+  }, [heatData, mapReady]);
 
   if (Platform.OS === 'web') {
     return (
@@ -417,10 +495,14 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
           </View>
         ) : (
           <WebView
+            ref={webViewRef}
             source={{ html: htmlContent }}
             style={[styles.webview, { opacity: dataReady && !loading ? 1 : 0 }]}
             onLoadEnd={() => {
-              setTimeout(() => setLoading(false), 1000);
+              setTimeout(() => {
+                setLoading(false);
+                setMapReady(true);
+              }, 600);
             }}
             onError={() => {
               setError('Erro ao carregar mapa');
@@ -433,7 +515,7 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
             originWhitelist={['*']}
             mixedContentMode="compatibility"
             allowsInlineMediaPlayback={true}
-            cacheEnabled={true}
+            cacheEnabled={false}
           />
         )}
       </View>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { StyleSheet, TouchableOpacity, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { View } from '@/components/ui/view';
@@ -27,6 +27,7 @@ import {
   shareReport,
   type ReportType,
 } from '@/services/report-service';
+import { HeatmapCapture } from '@/components/maps/heatmap-capture';
 import { logger } from '@/services/logger';
 
 interface GeneratedReport {
@@ -49,6 +50,38 @@ export default function RelatoriosScreen() {
   const fazenda = useAuthFazendaPadrao();
   const [isGenerating, setIsGenerating] = useState<ReportType | null>(null);
   const [reports, setReports] = useState<GeneratedReport[]>([]);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const captureResolveRef = useRef<((base64: string | null) => void) | null>(null);
+
+  const finishReport = useCallback(async (result: { uri: string; type: ReportType }) => {
+    setReports(prev => [{
+      ...result,
+      generatedAt: new Date().toLocaleString('pt-BR'),
+    }, ...prev]);
+
+    Alert.alert(
+      'Relatório Gerado',
+      'O que deseja fazer?',
+      [
+        { text: 'Visualizar', onPress: () => previewReport(result.uri) },
+        { text: 'Compartilhar', onPress: () => shareReport(result.uri).catch(() => Alert.alert('Erro', 'Não foi possível compartilhar')) },
+        { text: 'OK', style: 'cancel' },
+      ],
+    );
+  }, []);
+
+  const handleHeatmapCapture = useCallback((base64: string) => {
+    captureResolveRef.current?.(base64);
+    captureResolveRef.current = null;
+    setIsCapturing(false);
+  }, []);
+
+  const handleHeatmapCaptureError = useCallback((err: string) => {
+    logger.warn('Falha na captura do heatmap, usando SVG', { err });
+    captureResolveRef.current?.(null);
+    captureResolveRef.current = null;
+    setIsCapturing(false);
+  }, []);
 
   const handleGenerate = async (type: ReportType) => {
     if (!fazenda?.id) {
@@ -59,29 +92,28 @@ export default function RelatoriosScreen() {
     try {
       setIsGenerating(type);
 
-      const result = type === 'technical'
-        ? await generateTechnicalReport(Number(fazenda.id), 'Responsável Técnico')
-        : await generatePestDiseaseReport(Number(fazenda.id), 'Responsável Técnico');
+      if (type === 'technical') {
+        const result = await generateTechnicalReport(Number(fazenda.id), 'Responsável Técnico');
+        await finishReport(result);
+      } else {
+        setIsCapturing(true);
+        const heatmapImage = await new Promise<string | null>((resolve) => {
+          captureResolveRef.current = resolve;
+        });
 
-      setReports(prev => [{
-        ...result,
-        generatedAt: new Date().toLocaleString('pt-BR'),
-      }, ...prev]);
-
-      Alert.alert(
-        'Relatório Gerado',
-        'O que deseja fazer?',
-        [
-          { text: 'Visualizar', onPress: () => previewReport(result.uri) },
-          { text: 'Compartilhar', onPress: () => shareReport(result.uri).catch(() => Alert.alert('Erro', 'Não foi possível compartilhar')) },
-          { text: 'OK', style: 'cancel' },
-        ]
-      );
+        const result = await generatePestDiseaseReport(
+          Number(fazenda.id),
+          'Responsável Técnico',
+          heatmapImage ?? undefined,
+        );
+        await finishReport(result);
+      }
     } catch (error: any) {
       logger.error('Erro ao gerar relatório', { error: error.message, type });
       Alert.alert('Erro', `Erro ao gerar relatório: ${error.message}`);
     } finally {
       setIsGenerating(null);
+      setIsCapturing(false);
     }
   };
 
@@ -103,6 +135,13 @@ export default function RelatoriosScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
+      {isCapturing && (
+        <HeatmapCapture
+          onCapture={handleHeatmapCapture}
+          onError={handleHeatmapCaptureError}
+        />
+      )}
+
       <AppHeader
         title="Relatórios"
         avatarUri={avatarUri}

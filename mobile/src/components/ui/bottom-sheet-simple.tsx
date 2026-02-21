@@ -35,6 +35,7 @@ export function BottomSheet({
   style,
 }: BottomSheetProps) {
   const cardColor = useColor({}, 'card');
+  const textColor = useColor({}, 'text');
   const mutedColor = useColor({}, 'textMuted');
   const slideAnim = React.useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
@@ -129,7 +130,7 @@ export function BottomSheet({
                 paddingBottom: 8,
               }}
             >
-              <Text variant="title" style={{ textAlign: 'center' }}>
+              <Text variant="title" style={{ textAlign: 'center', color: textColor }}>
                 {title}
               </Text>
             </View>

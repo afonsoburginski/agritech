@@ -36,7 +36,7 @@
         "expo-build-properties",
         {
           "android": {
-            "kotlinVersion": "1.6.10",
+            "kotlinVersion": "2.1.20",
             "packagingOptions": {
               "pickFirst": [
                 "**/libc++_shared.so"

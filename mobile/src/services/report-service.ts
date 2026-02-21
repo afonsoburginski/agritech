@@ -195,7 +195,7 @@ function buildReportData(
       : `O monitoramento realizado em ${dataRelatorio} identificou ${pragas.length} ocorrência(s) de pragas/doenças na propriedade ${fazenda?.nome ?? ''}. ${principaisPragas.length > 0 ? `Principais pragas: ${principaisPragas.join(', ')}.` : ''} Recomenda-se seguir as ações de manejo indicadas e agendar novo monitoramento em 7 dias.`,
     dataProximoRelatorio,
     heatmapSvg: getHeatmapSVG(heatMapPoints, talhoesForSvg),
-  };
+  } as TechnicalReportData | PestDiseaseReportData;
 }
 
 /**
@@ -218,16 +218,24 @@ export async function generateTechnicalReport(
 }
 
 /**
- * Gera PDF de Relatório de Pragas e Doenças (monitoramento automatizado)
+ * Gera PDF de Relatório de Pragas e Doenças (monitoramento automatizado).
+ * Se `heatmapImageBase64` for fornecido (data:image/…), usa a imagem real do heatmap
+ * capturada pelo componente HeatmapCapture; caso contrário, usa SVG estático.
  */
 export async function generatePestDiseaseReport(
   fazendaId: number,
   responsavel: string,
+  heatmapImageBase64?: string,
 ): Promise<ReportResult> {
-  logger.info('Gerando Relatório de Pragas e Doenças', { fazendaId });
+  logger.info('Gerando Relatório de Pragas e Doenças', { fazendaId, hasImage: !!heatmapImageBase64 });
 
   const rawData = await fetchReportData(fazendaId);
   const reportData = buildReportData(rawData, responsavel) as PestDiseaseReportData;
+
+  if (heatmapImageBase64) {
+    reportData.heatmapImage = heatmapImageBase64;
+  }
+
   const html = generatePestDiseaseReportHTML(reportData);
 
   const { uri } = await Print.printToFileAsync({ html, base64: false });

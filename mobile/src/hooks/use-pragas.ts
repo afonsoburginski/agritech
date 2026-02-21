@@ -357,23 +357,27 @@ export function useReconhecimento() {
       if (hasValidScoutId) {
         const { supabase, isSupabaseConfigured } = await import('@/services/supabase');
         if (isSupabaseConfigured() && supabase) {
-          const { getEmbrapaRecomendacaoId } = await import('@/services/embrapa-recomendacoes');
+          const { getEmbrapaRecomendacaoId, getOutrosEmbrapaId } = await import('@/services/embrapa-recomendacoes');
           const embrapaRecomendacaoId = await getEmbrapaRecomendacaoId(
             supabase,
             pragaNome,
             result.nomeCientifico ?? null
           );
-          const { error: supaError } = await supabase.from('scout_pragas').insert({
+          const embrapaId = embrapaRecomendacaoId ?? await getOutrosEmbrapaId(supabase);
+          const insertPayload = {
             scout_id: scoutIdNum,
-            embrapa_recomendacao_id: embrapaRecomendacaoId,
+            embrapa_recomendacao_id: embrapaId,
+            praga_nome: pragaNome,
             tipo_praga: result.tipoPraga ?? 'PRAGA',
             contagem,
             presenca: true,
             prioridade: result.severidade === 'critica' ? 'ALTA' : result.severidade === 'alta' ? 'ALTA' : result.severidade === 'media' ? 'MEDIA' : 'BAIXA',
-            observacao: result.recomendacao,
+            observacao: null,
+            recomendacao: result.recomendacao ?? null,
             data_contagem: now,
             imagem_url: result.imagemUrl ?? null,
-          });
+          } as import('@/types/supabase').TablesInsert<'scout_pragas'>;
+          const { error: supaError } = await supabase.from('scout_pragas').insert(insertPayload);
 
           if (supaError) {
             logger.error('Erro ao salvar praga no Supabase', { error: supaError });

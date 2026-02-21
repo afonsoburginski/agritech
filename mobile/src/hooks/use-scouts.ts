@@ -10,6 +10,7 @@ import { getWatermelonDB } from '@/database/watermelon';
 import ScoutModel from '@/database/watermelon/models/Scout';
 import { logger } from '@/services/logger';
 import { useAppStore } from '@/stores/app-store';
+import { useAuthFazendaPadrao } from '@/stores/auth-store';
 import { syncService } from '@/services/sync-service';
 
 export interface Scout {
@@ -68,6 +69,8 @@ export function useScouts() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const updateCounts = useAppStore((s) => s.updateCounts);
+  const fazenda = useAuthFazendaPadrao();
+  const fazendaId = fazenda?.id != null ? Number(fazenda.id) : null;
 
   const load = useCallback(async () => {
     try {
@@ -114,6 +117,10 @@ export function useScouts() {
     const now = new Date();
     const nowStr = now.toISOString();
     const id = generateId();
+    const scoutNome = input.talhaoNome
+      ? `Scout ${input.talhaoNome}`
+      : `Scout ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+
     const newScout: Scout = {
       id,
       latitude: input.latitude,
@@ -152,13 +159,12 @@ export function useScouts() {
         });
 
         await syncService.addToQueue('scouts', id, 'create', {
-          id,
+          fazendaId: fazendaId,
+          nome: scoutNome,
+          observacao: input.observacoes ?? null,
+          status: 'PENDENTE',
           latitude: newScout.latitude,
           longitude: newScout.longitude,
-          accuracy: newScout.accuracy,
-          altitude: newScout.altitude,
-          createdAt: newScout.createdAt,
-          updatedAt: newScout.updatedAt,
         });
         logger.info('Scout salvo no WatermelonDB e adicionado à fila de sync', { id });
       }
@@ -173,7 +179,7 @@ export function useScouts() {
       logger.error('Erro ao criar scout', { error: err.message });
       throw new Error('Erro ao criar scout');
     }
-  }, []);
+  }, [fazendaId]);
 
   const marcarVisitado = useCallback(async (id: string) => {
     const now = new Date().toISOString();

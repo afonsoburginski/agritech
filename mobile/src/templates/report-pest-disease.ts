@@ -55,8 +55,10 @@ export interface PestDiseaseReportData {
   conclusao: string;
   conclusaoParagrafo2: string;
   dataProximoRelatorio: string;
-  /** SVG do mapa de calor (gerado pelo heatmap do app) para embed no PDF */
+  /** SVG do mapa de calor (fallback) */
   heatmapSvg?: string;
+  /** Imagem base64 (data:image/jpeg;base64,...) do heatmap real capturado do app */
+  heatmapImage?: string;
 }
 
 export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): string {
@@ -128,9 +130,13 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
     .header-block { margin-bottom: 16px; }
     .header-block p { margin-bottom: 4px; font-size: 11px; color: #000; }
     .intro { margin-bottom: 12px; text-align: justify; }
-    .map-container { width: 100%; height: 200px; border: 1px solid #000; margin: 12px 0 20px; background: #fff; overflow: hidden; }
-.map-container svg { width: 100%; height: 100%; }
-.map-placeholder { width: 100%; height: 180px; border: 1px solid #000; background: #fff; display: flex; align-items: center; justify-content: center; margin: 0; font-size: 11px; color: #000; }
+    .map-container { width: 100%; border: 1px solid #000; margin: 12px 0 20px; background: #000; overflow: hidden; border-radius: 4px; }
+    .map-container img { width: 100%; height: auto; display: block; }
+    .map-container svg { width: 100%; height: 200px; display: block; }
+    .map-placeholder { width: 100%; height: 180px; border: 1px solid #000; background: #fff; display: flex; align-items: center; justify-content: center; margin: 0; font-size: 11px; color: #000; }
+    .map-legend { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 9px; color: #333; }
+    .map-legend-bar { height: 10px; flex: 1; border-radius: 5px; background: linear-gradient(to right, #0000FF, #0050FF, #00B4FF, #00FFB4, #00FF00, #C8FF00, #FFC800, #FF7800, #FF3200, #FF0000); }
+    .map-legend span { white-space: nowrap; font-weight: 600; }
     .doc-title { font-size: 14px; font-weight: 700; text-align: center; margin: 0 0 16px 0; }
     .section { margin-bottom: 18px; page-break-inside: avoid; }
     .section h2 { font-size: 12px; font-weight: 700; color: #000; margin-bottom: 8px; }
@@ -207,7 +213,18 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
     <p class="intro" style="margin-top: 10px;">
       O mapa abaixo demonstra a intensidade de ocorrência de pragas e doenças detectadas pelo ${data.aplicativo}. As cores representam os níveis de risco:
     </p>
-    <div class="map-container">${data.heatmapSvg ?? '<div class="map-placeholder">[Inserir mapa de calor gerado pelo aplicativo]</div>'}</div>
+    <div class="map-container">${
+      data.heatmapImage
+        ? `<img src="${data.heatmapImage}" alt="Mapa de calor" />`
+        : data.heatmapSvg
+          ? data.heatmapSvg
+          : '<div class="map-placeholder">[Inserir mapa de calor gerado pelo aplicativo]</div>'
+    }</div>
+    <div class="map-legend">
+      <span>Baixa</span>
+      <div class="map-legend-bar"></div>
+      <span>Alta</span>
+    </div>
   </div>
 
   <div class="section">

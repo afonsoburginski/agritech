@@ -41,6 +41,10 @@ export interface AppState {
     pragasTotal: number;
   };
 
+  /** Incrementa para forçar refresh da lista de scouts (ex.: após salvar reconhecimento) */
+  scoutsRefreshTrigger: number;
+  triggerScoutsRefresh: () => void;
+
   // Actions
   setOnline: (isOnline: boolean) => void;
   setSyncing: (isSyncing: boolean) => void;
@@ -70,6 +74,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     scoutsPendentes: 0,
     pragasTotal: 0,
   },
+  scoutsRefreshTrigger: 0,
+  triggerScoutsRefresh: () => set((s) => ({ scoutsRefreshTrigger: s.scoutsRefreshTrigger + 1 })),
 
   setOnline: (isOnline) => {
     set({ isOnline });

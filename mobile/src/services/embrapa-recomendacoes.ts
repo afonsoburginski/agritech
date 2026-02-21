@@ -23,19 +23,21 @@ export async function getOutrosEmbrapaId(sb: SupabaseClient): Promise<number> {
     logger.warn('embrapa_recomendacoes: linha Outros não encontrada', { error: error?.message });
     throw new Error('Referência Embrapa "Outros" não encontrada');
   }
-  cacheOutrosId = data.id;
-  return cacheOutrosId;
+  const id = data.id as number;
+  cacheOutrosId = id;
+  return id;
 }
 
 /**
  * Resolve nome popular e/ou científico para embrapa_recomendacao_id.
- * Tenta primeiro por nome_praga (exato, trim), depois por nome_cientifico. Se não achar, retorna id de "Outros".
+ * Tenta primeiro por nome_praga (exato, trim), depois por nome_cientifico.
+ * Retorna null se não encontrar (embrapa_recomendacao_id é nullable em scout_pragas).
  */
 export async function getEmbrapaRecomendacaoId(
   sb: SupabaseClient,
   nomePraga: string,
   nomeCientifico?: string | null
-): Promise<number> {
+): Promise<number | null> {
   const nome = (nomePraga ?? '').trim();
   const cient = (nomeCientifico ?? '').trim();
 
@@ -59,5 +61,9 @@ export async function getEmbrapaRecomendacaoId(
     if (data?.id) return data.id;
   }
 
-  return getOutrosEmbrapaId(sb);
+  try {
+    return await getOutrosEmbrapaId(sb);
+  } catch {
+    return null;
+  }
 }

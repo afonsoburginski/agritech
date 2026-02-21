@@ -103,6 +103,39 @@ export type Database = {
           },
         ]
       }
+      embrapa_recomendacoes: {
+        Row: {
+          created_at: string | null
+          culturas_alvo: string[] | null
+          descricao: string | null
+          id: number
+          nome_cientifico: string | null
+          nome_praga: string
+          produtos_recomendados: Json | null
+          tipo: string
+        }
+        Insert: {
+          created_at?: string | null
+          culturas_alvo?: string[] | null
+          descricao?: string | null
+          id?: never
+          nome_cientifico?: string | null
+          nome_praga: string
+          produtos_recomendados?: Json | null
+          tipo?: string
+        }
+        Update: {
+          created_at?: string | null
+          culturas_alvo?: string[] | null
+          descricao?: string | null
+          id?: never
+          nome_cientifico?: string | null
+          nome_praga?: string
+          produtos_recomendados?: Json | null
+          tipo?: string
+        }
+        Relationships: []
+      }
       fazendas: {
         Row: {
           area_total: number | null
@@ -114,6 +147,7 @@ export type Database = {
           estado: string | null
           id: number
           nome: string
+          owner_id: string | null
           saude: Json | null
           saude_updated_at: string | null
           updated_at: string
@@ -128,6 +162,7 @@ export type Database = {
           estado?: string | null
           id?: number
           nome: string
+          owner_id?: string | null
           saude?: Json | null
           saude_updated_at?: string | null
           updated_at?: string
@@ -142,11 +177,20 @@ export type Database = {
           estado?: string | null
           id?: number
           nome?: string
+          owner_id?: string | null
           saude?: Json | null
           saude_updated_at?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fazendas_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       pest_reference_vectors: {
         Row: {
@@ -197,15 +241,7 @@ export type Database = {
           tipo?: string
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "pest_reference_vectors_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -284,51 +320,20 @@ export type Database = {
           },
         ]
       }
-      embrapa_recomendacoes: {
-        Row: {
-          created_at: string | null
-          culturas_alvo: string[] | null
-          descricao: string | null
-          id: number
-          nome_cientifico: string | null
-          nome_praga: string
-          produtos_recomendados: Json | null
-          tipo: string
-        }
-        Insert: {
-          created_at?: string | null
-          culturas_alvo?: string[] | null
-          descricao?: string | null
-          id?: number
-          nome_cientifico?: string | null
-          nome_praga: string
-          produtos_recomendados?: Json | null
-          tipo?: string
-        }
-        Update: {
-          created_at?: string | null
-          culturas_alvo?: string[] | null
-          descricao?: string | null
-          id?: number
-          nome_cientifico?: string | null
-          nome_praga?: string
-          produtos_recomendados?: Json | null
-          tipo?: string
-        }
-        Relationships: []
-      }
       scout_pragas: {
         Row: {
           contagem: number | null
           coordinates: Json | null
           data_contagem: string | null
           data_marcacao: string | null
-          embrapa_recomendacao_id: number
+          embrapa_recomendacao_id: number | null
           id: number
           imagem_url: string | null
           observacao: string | null
+          praga_nome: string | null
           presenca: boolean | null
           prioridade: string | null
+          recomendacao: string | null
           scout_id: number
           tipo_praga: string | null
         }
@@ -337,12 +342,14 @@ export type Database = {
           coordinates?: Json | null
           data_contagem?: string | null
           data_marcacao?: string | null
-          embrapa_recomendacao_id: number
+          embrapa_recomendacao_id?: number | null
           id?: number
           imagem_url?: string | null
           observacao?: string | null
+          praga_nome?: string | null
           presenca?: boolean | null
           prioridade?: string | null
+          recomendacao?: string | null
           scout_id: number
           tipo_praga?: string | null
         }
@@ -351,12 +358,14 @@ export type Database = {
           coordinates?: Json | null
           data_contagem?: string | null
           data_marcacao?: string | null
-          embrapa_recomendacao_id?: number
+          embrapa_recomendacao_id?: number | null
           id?: number
           imagem_url?: string | null
           observacao?: string | null
+          praga_nome?: string | null
           presenca?: boolean | null
           prioridade?: string | null
+          recomendacao?: string | null
           scout_id?: number
           tipo_praga?: string | null
         }
@@ -382,6 +391,7 @@ export type Database = {
           created_at: string
           fazenda_id: number
           id: number
+          imagem_url: string | null
           markers_visitados: number | null
           nome: string
           observacao: string | null
@@ -390,11 +400,13 @@ export type Database = {
           total_markers: number | null
           total_pragas: number | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           created_at?: string
           fazenda_id: number
           id?: number
+          imagem_url?: string | null
           markers_visitados?: number | null
           nome: string
           observacao?: string | null
@@ -403,11 +415,13 @@ export type Database = {
           total_markers?: number | null
           total_pragas?: number | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           created_at?: string
           fazenda_id?: number
           id?: number
+          imagem_url?: string | null
           markers_visitados?: number | null
           nome?: string
           observacao?: string | null
@@ -416,6 +430,7 @@ export type Database = {
           total_markers?: number | null
           total_pragas?: number | null
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -427,6 +442,38 @@ export type Database = {
           },
           {
             foreignKeyName: "scouts_talhao_id_fkey"
+            columns: ["talhao_id"]
+            isOneToOne: false
+            referencedRelation: "talhoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talhao_infestacao_historico: {
+        Row: {
+          created_at: string
+          data: string
+          id: number
+          percentual_infestacao: number
+          talhao_id: number
+        }
+        Insert: {
+          created_at?: string
+          data: string
+          id?: number
+          percentual_infestacao?: number
+          talhao_id: number
+        }
+        Update: {
+          created_at?: string
+          data?: string
+          id?: number
+          percentual_infestacao?: number
+          talhao_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talhao_infestacao_historico_talhao_id_fkey"
             columns: ["talhao_id"]
             isOneToOne: false
             referencedRelation: "talhoes"
@@ -530,6 +577,18 @@ export type Database = {
         Args: { p_month_start?: string; p_talhao_id: number }
         Returns: Json
       }
+      point_in_talhao_polygon: {
+        Args: { coords: Json; p_lat: number; p_lng: number }
+        Returns: boolean
+      }
+      recalc_fazenda_saude: {
+        Args: { p_fazenda_id: number }
+        Returns: undefined
+      }
+      recalc_talhao_percentual_infestacao: {
+        Args: { p_talhao_id: number }
+        Returns: undefined
+      }
     }
     Enums: {
       atividade_prioridade: "BAIXA" | "MEDIA" | "ALTA" | "CRITICA"
@@ -542,7 +601,14 @@ export type Database = {
         | "PLANTIO"
         | "COLHEITA"
         | "OUTROS"
-      cultura_talhao_enum: "TRIGO" | "MILHO" | "ALGODAO" | "SOJA" | "CAFE" | "FEIJAO" | "OUTROS"
+      cultura_talhao_enum:
+        | "TRIGO"
+        | "MILHO"
+        | "ALGODAO"
+        | "SOJA"
+        | "CAFE"
+        | "FEIJAO"
+        | "OUTROS"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -695,7 +761,15 @@ export const Constants = {
         "COLHEITA",
         "OUTROS",
       ],
-      cultura_talhao_enum: ["TRIGO", "MILHO", "ALGODAO", "SOJA", "CAFE", "FEIJAO", "OUTROS"],
+      cultura_talhao_enum: [
+        "TRIGO",
+        "MILHO",
+        "ALGODAO",
+        "SOJA",
+        "CAFE",
+        "FEIJAO",
+        "OUTROS",
+      ],
     },
   },
 } as const
