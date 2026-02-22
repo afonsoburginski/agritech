@@ -49,8 +49,9 @@ class LocationService {
         speed: location.coords.speed || undefined,
       };
     } catch (error: any) {
-      logger.error('Erro ao obter localização', { error: error.message }, error);
-      throw new Error(error.message || 'Erro ao obter localização');
+      const msg = error?.message || 'Erro ao obter localização';
+      logger.warn('Localização indisponível', { error: msg });
+      throw new Error(msg);
     }
   }
 

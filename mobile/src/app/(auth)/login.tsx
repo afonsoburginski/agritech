@@ -39,6 +39,13 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email.trim(), senha);
+      // Redirecionamento explícito após login (garante funcionar no Android/Expo Go)
+      const pendingChoice = useAuthStore.getState().pendingFazendaChoice;
+      if (pendingChoice) {
+        router.replace('/(auth)/escolher-fazenda');
+      } else {
+        router.replace('/(tabs)');
+      }
     } catch (error: any) {
       Alert.alert('Erro no Login', error.message || 'Não foi possível fazer login');
     } finally {

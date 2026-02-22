@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/services/supabase';
 import { logger } from '@/services/logger';
+import { storage } from '@/services/storage';
+import { getUserFacingError, ERROR_MESSAGES } from '@/utils/error-messages';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { useAppStore } from '@/stores/app-store';
 
@@ -48,6 +50,8 @@ interface AuthState {
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   loadProfile: () => Promise<void>;
+  /** Restaura perfil e fazendas do cache local (para uso offline). Retorna true se restaurou. */
+  loadProfileFromCache: (userId: string) => Promise<boolean>;
   /** Faz upload da foto de perfil (URI local), atualiza profiles.avatar_url e estado. */
   uploadAvatar: (localUri: string) => Promise<string>;
   /** Lista todas as fazendas do usuário (para trocar fazenda padrão). */
@@ -71,15 +75,39 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   initialize: () => {
     if (!supabase) {
-      logger.warn('Supabase not configured, skipping auth initialization');
+      logger.warn('Supabase não configurado, pulando inicialização da autenticação');
       set({ isLoading: false });
       return () => {};
     }
+
+    // Restaurar sessão persistida (AsyncStorage) imediatamente para permitir uso offline
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          set({ session, user: session.user });
+          try {
+            await get().loadProfile();
+          } catch (e) {
+            logger.warn('loadProfile falhou (offline?), tentando cache', { error: e });
+            const restored = await get().loadProfileFromCache(session.user.id);
+            if (!restored) {
+              set({ profile: null, fazendaPadrao: null, pendingFazendaChoice: false });
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn('Erro ao restaurar sessão no init', { error: e });
+      } finally {
+        set({ isLoading: false });
+      }
+    })();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
 
         if (event === 'SIGNED_OUT' || !session) {
+          storage.clearAuthCache().catch(() => {});
           useAppStore.getState().setAvatar(null);
           set({
             session: null,
@@ -102,7 +130,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           try {
             await get().loadProfile();
           } catch (e) {
-            logger.warn('Erro ao carregar perfil no initialize', { error: e });
+            logger.warn('Erro ao carregar perfil no onAuthStateChange', { error: e });
+            const restored = await get().loadProfileFromCache(session.user.id);
+            if (!restored) {
+              set({ profile: null, fazendaPadrao: null, pendingFazendaChoice: false });
+            }
           }
         }
         set({ isLoading: false });
@@ -136,12 +168,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       });
 
       if (error) {
-        let message = error.message;
-        if (message === 'Invalid login credentials') {
-          message = 'E-mail ou senha incorretos';
-        } else if (message === 'Email not confirmed') {
-          message = 'E-mail não confirmado. Verifique sua caixa de entrada.';
-        }
+        const message = getUserFacingError(error, 'E-mail ou senha incorretos. Tente novamente.');
         throw new Error(message);
       }
 
@@ -156,7 +183,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Carrega perfil e fazendas para definir pendingFazendaChoice antes do redirecionamento
       await get().loadProfile();
     } catch (error: any) {
-      const errorMessage = error.message || 'Erro ao fazer login';
+      const errorMessage = getUserFacingError(error, 'Não foi possível fazer login. Tente novamente.');
       set({ isLoading: false, error: errorMessage });
       throw new Error(errorMessage);
     }
@@ -182,10 +209,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       });
 
       if (error) {
-        let message = error.message;
-        if (message.includes('already registered')) {
-          message = 'Este e-mail já está cadastrado';
-        }
+        const message = getUserFacingError(error, 'Não foi possível criar a conta. Tente outro e-mail.');
         throw new Error(message);
       }
 
@@ -196,7 +220,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
       logger.info('Sign up successful', { userId: data.user?.id });
     } catch (error: any) {
-      const errorMessage = error.message || 'Erro ao criar conta';
+      const errorMessage = getUserFacingError(error, 'Não foi possível criar a conta. Tente novamente.');
       set({ isLoading: false, error: errorMessage });
       throw new Error(errorMessage);
     }
@@ -208,12 +232,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-        logger.error('Error signing out', { error: error.message });
+        logger.error('Erro ao sair', { error: error.message });
       }
+      await storage.clearAuthCache();
       // State is handled by onAuthStateChange
     } catch (error) {
-      logger.error('Error signing out', { error }, error as Error);
-      // Force clear local state even on error
+      logger.error('Erro ao sair', { error }, error as Error);
+      await storage.clearAuthCache().catch(() => {});
       set({
         session: null,
         user: null,
@@ -262,7 +287,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         .single();
 
       if (profileError) {
-        logger.warn('Error loading profile', { error: profileError.message });
+        logger.warn('Erro ao carregar perfil', { error: profileError.message });
       }
 
       // Load user's fazendas (todas; primeira como padrão se ainda não tiver uma definida)
@@ -273,7 +298,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         .order('created_at', { ascending: true });
 
       if (fazendaError) {
-        logger.warn('Error loading fazendas', { error: fazendaError.message });
+        logger.warn('Erro ao carregar fazendas', { error: fazendaError.message });
       }
 
       const list: Fazenda[] = (userFazendas ?? []).map((uf) => ({
@@ -307,6 +332,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         pendingFazendaChoice: hasMultipleFazendas,
       });
 
+      // Persistir no cache local para login offline
+      if (user?.id && profileData && list.length >= 0) {
+        storage.saveAuthCache(user.id, profileData, list, fazenda ?? null).catch(() => {});
+      }
+
       // Sincronizar avatar no app-store (profile primeiro, depois auth user_metadata)
       const avatarFromAuth = user?.user_metadata?.avatar_url;
       const effectiveAvatar =
@@ -314,8 +344,25 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         (avatarFromAuth && typeof avatarFromAuth === 'string' && avatarFromAuth.length > 0 ? avatarFromAuth : null);
       useAppStore.getState().setAvatar(effectiveAvatar);
     } catch (error) {
-      logger.error('Error loading profile data', { error }, error as Error);
+      logger.error('Erro ao carregar dados do perfil', { error }, error as Error);
     }
+  },
+
+  loadProfileFromCache: async (userId: string): Promise<boolean> => {
+    const cache = await storage.getAuthCache();
+    if (!cache || cache.userId !== userId) return false;
+    const profile = cache.profile as Profile;
+    const fazendas = (cache.fazendas as Fazenda[]).filter((f) => f.id != null);
+    const fazendaPadrao = cache.fazendaPadrao as Fazenda | null;
+    set({
+      profile,
+      fazendaPadrao: fazendaPadrao ?? (fazendas.length > 0 ? fazendas[0] : null),
+      pendingFazendaChoice: fazendas.length > 1,
+    });
+    const avatar = profile?.avatar_url ?? null;
+    if (avatar) useAppStore.getState().setAvatar(avatar);
+    logger.info('Perfil restaurado do cache para uso offline', { userId });
+    return true;
   },
 
   loadFazendas: async () => {
@@ -356,7 +403,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     if (uploadError) {
       logger.error('Erro ao fazer upload do avatar', { error: uploadError.message });
-      throw new Error(uploadError.message || 'Falha ao enviar foto');
+      throw new Error(getUserFacingError(uploadError, 'Não foi possível enviar a foto. Tente novamente.'));
     }
 
     const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
@@ -370,7 +417,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     if (updateError) {
       logger.error('Erro ao atualizar avatar no perfil', { error: updateError.message });
-      throw new Error(updateError.message || 'Falha ao atualizar perfil');
+      throw new Error(getUserFacingError(updateError, 'Não foi possível atualizar o perfil. Tente novamente.'));
     }
 
     // Sincroniza diretamente com auth metadata (redundância de segurança)

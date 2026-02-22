@@ -19,7 +19,6 @@ import ScoutModel from '@/database/watermelon/models/Scout';
 import PragaModel from '@/database/watermelon/models/Praga';
 import { logger } from './logger';
 import { useAppStore } from '@/stores/app-store';
-import { processRecognitionQueue } from './recognition-queue-service';
 
 export type SyncOperation = 'create' | 'update' | 'delete';
 export type EntityType = 'atividades' | 'scouts' | 'pragas';
@@ -156,15 +155,7 @@ class SyncService {
       // 2. Baixar dados remotos (download)
       await this.downloadRemoteData();
 
-      // 3. Processar fila de reconhecimento de pragas (fotos tiradas offline)
-      try {
-        const { processed } = await processRecognitionQueue();
-        if (processed > 0) {
-          logger.info('Reconhecimentos da fila processados', { count: processed });
-        }
-      } catch (err) {
-        logger.warn('Erro ao processar fila de reconhecimento', { error: err });
-      }
+      // Fila de reconhecimento é processada manualmente na tela Reconhecimento (um a um ao tocar)
 
       // Marcar como sincronizado
       useAppStore.getState().markSynced();

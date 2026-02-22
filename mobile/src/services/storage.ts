@@ -8,6 +8,11 @@ const StorageKeys = {
   SAVED_EMAIL: '@Auth:savedEmail',
   SAVED_PASSWORD: 'Auth_savedPassword', // SecureStore não aceita @ e :
   AUTO_LOGIN_ENABLED: '@Auth:autoLoginEnabled',
+  /** Cache de perfil + fazendas para uso offline (vinculado ao user id) */
+  AUTH_CACHED_USER_ID: '@Auth:cachedUserId',
+  AUTH_CACHED_PROFILE: '@Auth:cachedProfile',
+  AUTH_CACHED_FAZENDAS: '@Auth:cachedFazendas',
+  AUTH_CACHED_FAZENDA_PADRAO: '@Auth:cachedFazendaPadrao',
 } as const;
 
 export const storage = {
@@ -77,6 +82,48 @@ export const storage = {
     }
   },
 
+  // Cache de perfil/fazendas para login offline
+  async saveAuthCache(userId: string, profile: object, fazendas: object[], fazendaPadrao: object | null): Promise<void> {
+    try {
+      await AsyncStorage.setItem(StorageKeys.AUTH_CACHED_USER_ID, userId);
+      await AsyncStorage.setItem(StorageKeys.AUTH_CACHED_PROFILE, JSON.stringify(profile));
+      await AsyncStorage.setItem(StorageKeys.AUTH_CACHED_FAZENDAS, JSON.stringify(fazendas));
+      await AsyncStorage.setItem(StorageKeys.AUTH_CACHED_FAZENDA_PADRAO, JSON.stringify(fazendaPadrao ?? null));
+    } catch (error) {
+      logger.error('Erro ao salvar cache de auth', { error });
+    }
+  },
+
+  async getAuthCache(): Promise<{ userId: string; profile: object; fazendas: object[]; fazendaPadrao: object | null } | null> {
+    try {
+      const userId = await AsyncStorage.getItem(StorageKeys.AUTH_CACHED_USER_ID);
+      const profileRaw = await AsyncStorage.getItem(StorageKeys.AUTH_CACHED_PROFILE);
+      const fazendasRaw = await AsyncStorage.getItem(StorageKeys.AUTH_CACHED_FAZENDAS);
+      const fazendaPadraoRaw = await AsyncStorage.getItem(StorageKeys.AUTH_CACHED_FAZENDA_PADRAO);
+      if (!userId || !profileRaw || !fazendasRaw) return null;
+      const profile = JSON.parse(profileRaw) as object;
+      const fazendas = JSON.parse(fazendasRaw) as object[];
+      const fazendaPadrao = fazendaPadraoRaw ? (JSON.parse(fazendaPadraoRaw) as object | null) : null;
+      return { userId, profile, fazendas, fazendaPadrao };
+    } catch (error) {
+      logger.error('Erro ao ler cache de auth', { error });
+      return null;
+    }
+  },
+
+  async clearAuthCache(): Promise<void> {
+    try {
+      await AsyncStorage.multiRemove([
+        StorageKeys.AUTH_CACHED_USER_ID,
+        StorageKeys.AUTH_CACHED_PROFILE,
+        StorageKeys.AUTH_CACHED_FAZENDAS,
+        StorageKeys.AUTH_CACHED_FAZENDA_PADRAO,
+      ]);
+    } catch (error) {
+      logger.error('Erro ao limpar cache de auth', { error });
+    }
+  },
+
   // Limpar tudo (logout)
   async clearAll(): Promise<void> {
     await AsyncStorage.multiRemove([
@@ -84,12 +131,16 @@ export const storage = {
       StorageKeys.AUTH_USER,
       StorageKeys.SAVED_EMAIL,
       StorageKeys.AUTO_LOGIN_ENABLED,
+      StorageKeys.AUTH_CACHED_USER_ID,
+      StorageKeys.AUTH_CACHED_PROFILE,
+      StorageKeys.AUTH_CACHED_FAZENDAS,
+      StorageKeys.AUTH_CACHED_FAZENDA_PADRAO,
     ]);
-    // Limpar senha do SecureStore
     try {
       await SecureStore.deleteItemAsync(StorageKeys.SAVED_PASSWORD);
-    } catch (error) {
+    } catch {
       // Ignorar erro se não existir
     }
+    await this.clearAuthCache();
   },
 };

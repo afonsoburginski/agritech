@@ -14,8 +14,9 @@ import {
   LogOut,
   ChevronsUpDown,
   UserCircle,
+  Building2,
+  Layers,
 } from "lucide-react"
-import { ThemeToggle } from "@/components/theme-toggle"
 import { createClient } from "@/lib/supabase-browser"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -41,18 +42,29 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 
-const navOperacao = [
+interface NavItem {
+  title: string
+  url: string
+  icon: React.ComponentType<any>
+  adminOnly?: boolean
+}
+
+const navPrincipal: NavItem[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Monitoramento", url: "/pragas", icon: Bug },
-  { title: "AI Training", url: "/vetorizacao", icon: Sparkles },
 ]
 
-const navGestao = [
-  { title: "Usuários", url: "/usuarios", icon: Users },
+const navGestao: NavItem[] = [
+  { title: "Talhões", url: "/talhoes", icon: Layers },
+  { title: "Usuários", url: "/usuarios", icon: Users, adminOnly: true },
   { title: "Relatórios", url: "/relatorios", icon: FileText },
 ]
 
-const navAjustes = [
+const navFerramentasAdmin: NavItem[] = [
+  { title: "AI Training", url: "/vetorizacao", icon: Sparkles },
+]
+
+const navAjustes: NavItem[] = [
   { title: "Configurações", url: "/configuracoes", icon: Settings },
 ]
 
@@ -61,25 +73,32 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const router = useRouter()
   const { isMobile } = useSidebar()
   const supabase = createClient()
-  const [user, setUser] = React.useState<{ email?: string; nome?: string } | null>(null)
+  const [user, setUser] = React.useState<{ email?: string; nome?: string; role?: string } | null>(null)
 
   React.useEffect(() => {
     async function loadUser() {
       const { data: { user: authUser } } = await supabase.auth.getUser()
-      if (authUser) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('nome')
-          .eq('id', authUser.id)
-          .single()
-        setUser({
-          email: authUser.email,
-          nome: profile?.nome ?? authUser.email?.split('@')[0] ?? 'Usuário',
-        })
-      }
+      if (!authUser) return
+
+      const [profileRes, roleRes] = await Promise.all([
+        supabase.from('profiles').select('nome').eq('id', authUser.id).single(),
+        supabase.from('user_fazendas').select('role').eq('user_id', authUser.id).limit(1).single(),
+      ])
+
+      setUser({
+        email: authUser.email,
+        nome: profileRes.data?.nome ?? authUser.email?.split('@')[0] ?? 'Usuário',
+        role: roleRes.data?.role ?? 'technician',
+      })
     }
     loadUser()
   }, [])
+
+  const isAdmin = user?.role === 'owner'
+
+  function filterItems(items: NavItem[]) {
+    return items.filter(item => !item.adminOnly || isAdmin)
+  }
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -90,6 +109,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const initials = user?.nome
     ? user.nome.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : 'AG'
+
+  const roleLabel = isAdmin ? 'Proprietário' : 'Técnico'
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -113,48 +134,70 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
       <SidebarContent className="flex flex-col">
         <div className="flex flex-1 flex-col gap-2">
-        <SidebarGroup>
-          <SidebarGroupLabel>Principal</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navOperacao.map((item) => {
-                const isActive = pathname === item.url || (item.url !== "/" && pathname.startsWith(item.url))
-                return (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>Principal</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {filterItems(navPrincipal).map((item) => {
+                  const isActive = pathname === item.url || (item.url !== "/" && pathname.startsWith(item.url))
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+                        <Link href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Gestão</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navGestao.map((item) => {
-                const isActive = pathname === item.url || pathname.startsWith(item.url)
-                return (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-                      <Link href={item.url}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>Gestão</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {filterItems(navGestao).map((item) => {
+                  const isActive = pathname === item.url || pathname.startsWith(item.url)
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+                        <Link href={item.url}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
 
+          {isAdmin && (
+            <SidebarGroup>
+              <SidebarGroupLabel>Ferramentas admin</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {navFerramentasAdmin.map((item) => {
+                    const isActive = pathname === item.url || pathname.startsWith(item.url)
+                    return (
+                      <SidebarMenuItem key={item.url}>
+                        <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+                          <Link href={item.url}>
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
         </div>
 
         <SidebarGroup className="mt-auto">
@@ -195,7 +238,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold">{user?.nome ?? 'Carregando...'}</span>
-                    <span className="truncate text-xs text-muted-foreground">{user?.email ?? ''}</span>
+                    <span className="truncate text-xs text-muted-foreground">{roleLabel}</span>
                   </div>
                   <ChevronsUpDown className="ml-auto size-4" />
                 </SidebarMenuButton>
@@ -223,11 +266,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <DropdownMenuItem asChild>
                   <Link href="/conta">
                     <UserCircle className="mr-2 h-4 w-4" />
-                    Conta
+                    Minha conta
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/fazendas">
+                    <Building2 className="mr-2 h-4 w-4" />
+                    Dados das fazendas
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/configuracoes">
+                    <Settings className="mr-2 h-4 w-4" />
+                    Configurações
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout}>
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
                   <LogOut className="mr-2 h-4 w-4" />
                   Sair
                 </DropdownMenuItem>

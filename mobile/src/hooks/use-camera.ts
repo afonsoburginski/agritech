@@ -72,10 +72,9 @@ export function useCamera() {
 
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 3],
+        allowsEditing: false,
         quality: 0.8,
-        base64: false, // Não carregar base64 para economizar memória
+        base64: false,
       });
 
       setIsCapturing(false);
@@ -120,8 +119,7 @@ export function useCamera() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 3],
+        allowsEditing: false,
         quality: 0.8,
         base64: false,
       });

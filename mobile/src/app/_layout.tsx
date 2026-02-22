@@ -96,11 +96,13 @@ export default function RootLayout() {
   }, [initialize, loadAvatar]);
 
   // Auth-based navigation guard: login → (se >1 fazenda) (auth)/escolher-fazenda → tabs
+  // No Android/Expo Go segments pode vir em ordem diferente; considerar qualquer tela de auth
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
-    const onEscolherFazenda = segments[1] === 'escolher-fazenda';
+    const segs = (segments || []) as string[];
+    const inAuthGroup = segs[0] === '(auth)' || segs.some((s) => ['login', 'signup', 'forgot-password', 'escolher-fazenda'].includes(String(s)));
+    const onEscolherFazenda = segs.includes('escolher-fazenda');
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
@@ -114,7 +116,7 @@ export default function RootLayout() {
       }
       return;
     }
-    if (isAuthenticated && segments[0] === '(tabs)' && pendingFazendaChoice) {
+    if (isAuthenticated && (segs[0] === '(tabs)' || segs.includes('inicio')) && pendingFazendaChoice) {
       router.replace('/(auth)/escolher-fazenda');
     }
   }, [isAuthenticated, segments, isLoading, pendingFazendaChoice, router]);

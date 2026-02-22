@@ -37,7 +37,7 @@ export function useLocation(): UseLocationReturn {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro ao capturar localização';
       setError(errorMessage);
-      logger.error('Erro ao capturar localização', { error: err }, err as Error);
+      logger.warn('Localização indisponível (simulador ou sem permissão)', { error: errorMessage });
       return null;
     } finally {
       setLoading(false);

@@ -223,7 +223,7 @@ export default function RelatoriosPage() {
                 <FileText className="mb-3 h-14 w-14 opacity-40" />
                 <p className="font-medium">Nenhum relatório gerado ainda</p>
                 <p className="mt-1 text-center text-sm max-w-sm">
-                  Os dados vêm dos <strong>scouts</strong> e <strong>scout_marker_pragas</strong> da fazenda escolhida.
+                  Os dados vêm dos <strong>scouts</strong> e <strong>scout_pragas</strong> da fazenda escolhida.
                 </p>
                 <p className="mt-2 text-xs flex items-center gap-1">
                   <Info className="h-3.5 w-3.5" /> Selecione os parâmetros e clique em Pré-visualizar

@@ -19,6 +19,8 @@ const routeLabels: Record<string, string> = {
   relatorios: "Relatórios",
   configuracoes: "Configurações",
   conta: "Conta",
+  fazendas: "Dados das fazendas",
+  talhoes: "Talhões",
 }
 
 export function HeaderBreadcrumb() {

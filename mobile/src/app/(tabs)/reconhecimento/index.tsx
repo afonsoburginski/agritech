@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { StyleSheet, TouchableOpacity, Dimensions, Alert, ActivityIndicator, Image as RNImage } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState, useEffect, useCallback } from 'react';
+import { StyleSheet, TouchableOpacity, Dimensions, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { useCamera } from '@/hooks/use-camera';
@@ -12,14 +12,22 @@ import { useColor } from '@/hooks/useColor';
 import { useAppStore, usePendingRecognitionCount, useLastProcessedRecognitionCount } from '@/stores/app-store';
 import { useAuthFazendaPadrao, useAuthStore } from '@/stores/auth-store';
 import { useReconhecimentoResultStore, type DetectedPestEntry } from '@/stores/reconhecimento-result-store';
-import { refreshPendingRecognitionCount } from '@/services/recognition-queue-service';
+import {
+  refreshPendingRecognitionCount,
+  getPendingRecognitionsList,
+  processSingleRecognition,
+  addToRecognitionQueue,
+  type PendingRecognitionItem,
+} from '@/services/recognition-queue-service';
 import { Icon } from '@/components/ui/icon';
 import { palette } from '@/theme/colors';
 import { supabase, isSupabaseConfigured } from '@/services/supabase';
 import { logger } from '@/services/logger';
 import { getEmbrapaRecomendacaoId, getOutrosEmbrapaId } from '@/services/embrapa-recomendacoes';
 import type { TablesInsert } from '@/types/supabase';
-import { Camera, Image as ImageIcon, Zap, Target, Scan, Info, WifiOff, Search, RotateCcw } from 'lucide-react-native';
+import { ZoomableImage } from '@/components/zoomable-image';
+import { CameraScreen } from '@/components/camera-view';
+import { Camera, Image as ImageIcon, Zap, Target, Scan, Info, WifiOff, Search, X, RefreshCw, Download, List, ChevronRight } from 'lucide-react-native';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -57,7 +65,7 @@ export default function ReconhecimentoScreen() {
   const primaryForegroundColor = useColor({}, 'primaryForeground');
   const borderColor = useColor({}, 'border');
 
-  const { takePhoto, pickFromGallery, isCapturing } = useCamera();
+  const { pickFromGallery, isCapturing } = useCamera();
   const { recognize, result, saveResult, clear, imageUri, isRecognizing } = useReconhecimento();
   const { location, captureLocation } = useLocation();
   const { plots, isLoading: plotsLoading } = useSupabasePlots();
@@ -68,12 +76,23 @@ export default function ReconhecimentoScreen() {
   const setPayload = useReconhecimentoResultStore((s) => s.setPayload);
   const clearPayload = useReconhecimentoResultStore((s) => s.clearPayload);
   const [isSaving, setIsSaving] = useState(false);
-  /** Imagem selecionada da galeria: mostra preview e botão "Analisar imagem" antes de rodar a IA */
-  const [selectedGalleryImage, setSelectedGalleryImage] = useState<string | null>(null);
+  const [capturedImage, setCapturedImage] = useState<{ uri: string; source: 'camera' | 'gallery' } | null>(null);
+  const [pendingList, setPendingList] = useState<PendingRecognitionItem[]>([]);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
 
-  useEffect(() => {
-    refreshPendingRecognitionCount();
+  const loadPendingList = useCallback(async () => {
+    await refreshPendingRecognitionCount();
+    const list = await getPendingRecognitionsList();
+    setPendingList(list);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadPendingList();
+    }, [loadPendingList])
+  );
 
   useEffect(() => {
     if (lastProcessedCount > 0) {
@@ -91,54 +110,105 @@ export default function ReconhecimentoScreen() {
     cultura: plots[0]?.culturaAtual,
   };
 
-  const handleTakePhoto = async () => {
-    try {
-      const photo = await takePhoto();
-      if (!photo) return;
-      if (!isOnline) {
-        const saved = await savePhotoToGallery(photo.uri);
-        Alert.alert('Offline', saved ? 'Foto salva na galeria. Analise quando estiver online.' : 'Não foi possível salvar na galeria. Verifique as permissões.');
-        return;
-      }
-      const loc: LocationObject | null = await captureLocation() as LocationObject | null;
-      const res = await recognize(photo.uri, undefined, recognitionMetadata);
-      openResultScreen(res, loc, photo.uri);
-    } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Erro ao capturar foto');
-    }
+  const handleTakePhoto = () => {
+    setShowCamera(true);
   };
+
+  const handleCameraCapture = useCallback((uri: string) => {
+    setShowCamera(false);
+    setCapturedImage({ uri, source: 'camera' });
+  }, []);
+
+  const handleCameraClose = useCallback(() => {
+    setShowCamera(false);
+  }, []);
 
   const handleSelectImage = async () => {
     try {
       const image = await pickFromGallery();
       if (!image) return;
-      setSelectedGalleryImage(image.uri);
+      setCapturedImage({ uri: image.uri, source: 'gallery' });
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Erro ao selecionar imagem');
     }
   };
 
-  const handleAnalyzeSelectedImage = async () => {
-    if (!selectedGalleryImage) return;
+  const handleConfirmImage = async () => {
+    if (!capturedImage) return;
+    setIsConfirming(true);
     try {
       if (!isOnline) {
-        const saved = await savePhotoToGallery(selectedGalleryImage);
-        setSelectedGalleryImage(null);
-        Alert.alert('Offline', saved ? 'Foto salva na galeria. Analise quando estiver online.' : 'Não foi possível salvar na galeria. Verifique as permissões.');
+        const loc: LocationObject | null = (await captureLocation()) as LocationObject | null;
+        const saved = await savePhotoToGallery(capturedImage.uri);
+        await addToRecognitionQueue(capturedImage.uri, {
+          fazendaId: recognitionMetadata.fazendaId,
+          talhaoId: recognitionMetadata.talhaoId,
+          latitude: loc?.latitude,
+          longitude: loc?.longitude,
+        });
+        await loadPendingList();
+        setCapturedImage(null);
+        Alert.alert(
+          'Adicionado à fila',
+          saved
+            ? 'Foto salva na galeria e adicionada à fila. Conecte ao WiFi e toque no item abaixo para analisar.'
+            : 'Adicionado à fila. Conecte ao WiFi e toque no item abaixo para analisar.',
+        );
         return;
       }
-      const loc: LocationObject | null = await captureLocation() as LocationObject | null;
-      const capturedUri = selectedGalleryImage;
-      const res = await recognize(selectedGalleryImage, undefined, recognitionMetadata);
-      setSelectedGalleryImage(null);
-      openResultScreen(res, loc, capturedUri);
+      const loc: LocationObject | null = (await captureLocation()) as LocationObject | null;
+      const capturedUri = capturedImage.uri;
+      const res = await recognize(capturedImage.uri, undefined, recognitionMetadata);
+      setCapturedImage(null);
+      const locationToUse: LocationObject = loc ?? { latitude: 0, longitude: 0 };
+      openResultScreen(res, locationToUse, capturedUri);
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Erro ao analisar imagem');
+    } finally {
+      setIsConfirming(false);
     }
   };
 
-  const handleClearGalleryPreview = () => {
-    setSelectedGalleryImage(null);
+  const handleDiscardImage = () => {
+    setCapturedImage(null);
+  };
+
+  const handleRetakeOrReselect = async () => {
+    const source = capturedImage?.source;
+    setCapturedImage(null);
+    if (source === 'camera') {
+      handleTakePhoto();
+    } else {
+      handleSelectImage();
+    }
+  };
+
+  const handleProcessQueueItem = async (item: PendingRecognitionItem) => {
+    if (!isOnline) {
+      Alert.alert('Sem conexão', 'Conecte ao WiFi para analisar este item.');
+      return;
+    }
+    try {
+      setProcessingId(item.id);
+      const data = await processSingleRecognition(item.id);
+      if (data) {
+        await loadPendingList();
+        openResultScreen(data.result, data.location, data.imageUri);
+      }
+    } catch (error: any) {
+      await loadPendingList();
+      Alert.alert('Erro ao analisar', error.message || 'Não foi possível analisar. Toque novamente para tentar.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const formatQueueItemDate = (ts: number) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) return `Hoje às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const doConfirm = async (
@@ -305,14 +375,17 @@ export default function ReconhecimentoScreen() {
     router.push('/(tabs)/reconhecimento/resultado');
   };
 
-  const showingGalleryPreview = !!selectedGalleryImage && !isRecognizing;
+  const showingPreview = !!capturedImage && !isRecognizing;
+
+  if (showCamera) {
+    return <CameraScreen onCapture={handleCameraCapture} onClose={handleCameraClose} />;
+  }
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
       <View style={styles.header}>
         <View>
           <Text style={[styles.headerTitle, { color: textColor }]}>Reconhecimento</Text>
-          <Text style={[styles.headerSubtitle, { color: mutedColor }]}>Identifique pragas com IA</Text>
         </View>
         <TouchableOpacity style={[styles.infoButton, { borderColor: mutedColor + '60' }]} activeOpacity={0.7}>
           <Icon name={Info} size={20} color={mutedColor} />
@@ -323,36 +396,118 @@ export default function ReconhecimentoScreen() {
         <View style={[styles.offlineQueueBanner, { backgroundColor: '#F59E0B20', borderColor: '#F59E0B40' }]}>
           <Icon name={WifiOff} size={18} color="#F59E0B" />
           <Text style={[styles.offlineQueueText, { color: '#F59E0B' }]}>
-            {pendingRecognitionCount} foto(s) na fila. Serão analisadas quando estiver online.
+            {pendingRecognitionCount} foto(s) na fila. Conecte ao WiFi e toque em um item abaixo para analisar.
           </Text>
         </View>
       )}
 
-      <View style={styles.scannerSection}>
-        {showingGalleryPreview ? (
-          <View style={[styles.galleryPreviewFrame, { borderColor: primaryColor }]}>
-            <RNImage source={{ uri: selectedGalleryImage! }} style={styles.galleryPreviewImage} resizeMode="cover" />
-            <View style={styles.galleryPreviewOverlay}>
-              <Text style={styles.galleryPreviewTitleLight}>Imagem selecionada</Text>
-              <Text style={styles.galleryPreviewSubtitleLight}>
-                Toque no botão abaixo para identificar a praga
-              </Text>
+      {pendingList.length > 0 && (
+        <View style={[styles.queueSection, { backgroundColor: cardColor, borderColor }]}>
+          <View style={styles.queueSectionHeader}>
+            <Icon name={List} size={18} color={primaryColor} />
+            <Text style={[styles.queueSectionTitle, { color: textColor }]}>Na fila (aguardando WiFi)</Text>
+          </View>
+          <ScrollView style={styles.queueList} horizontal={false} showsVerticalScrollIndicator={false}>
+            {pendingList.map((item) => (
               <TouchableOpacity
-                style={[styles.analyzeButton, { backgroundColor: primaryColor }]}
-                onPress={handleAnalyzeSelectedImage}
-                activeOpacity={0.85}
-              >
-                <Icon name={Search} size={24} color="#FFF" />
-                <Text style={styles.analyzeButtonText}>Analisar imagem</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.chooseAnotherButton, { borderColor: borderColor }]}
-                onPress={handleClearGalleryPreview}
+                key={item.id}
+                style={[styles.queueItem, { backgroundColor, borderTopColor: borderColor }]}
+                onPress={() => handleProcessQueueItem(item)}
+                disabled={processingId !== null}
                 activeOpacity={0.7}
               >
-                <Icon name={RotateCcw} size={18} color={mutedColor} />
-                <Text style={[styles.chooseAnotherText, { color: mutedColor }]}>Escolher outra imagem</Text>
+                {processingId === item.id ? (
+                  <ActivityIndicator size="small" color={primaryColor} />
+                ) : (
+                  <Icon
+                    name={item.status === 'failed' ? RefreshCw : Search}
+                    size={20}
+                    color={item.status === 'failed' ? '#EF4444' : isOnline ? primaryColor : mutedColor}
+                  />
+                )}
+                <View style={styles.queueItemText}>
+                  <Text style={[styles.queueItemLabel, { color: item.status === 'failed' ? '#EF4444' : textColor }]}>
+                    {item.status === 'failed'
+                      ? 'Falhou — toque para tentar novamente'
+                      : isOnline
+                        ? 'Toque para analisar'
+                        : 'Conecte ao WiFi para analisar'}
+                  </Text>
+                  <Text style={[styles.queueItemDate, { color: mutedColor }]}>{formatQueueItemDate(item.createdAt)}</Text>
+                </View>
+                {isOnline && processingId !== item.id && (
+                  <Icon name={ChevronRight} size={18} color={mutedColor} />
+                )}
               </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      <View style={styles.scannerSection}>
+        {showingPreview ? (
+          <View style={styles.previewContainer}>
+            <View style={[styles.previewFrame, { borderColor: primaryColor }]}>
+              <ZoomableImage
+                uri={capturedImage!.uri}
+                imageWidth={width - 48}
+                imageHeight={380}
+                containerStyle={styles.previewScroll}
+              />
+              <TouchableOpacity
+                style={styles.previewCloseButton}
+                onPress={handleDiscardImage}
+                activeOpacity={0.8}
+              >
+                <Icon name={X} size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.previewActions}>
+              <Text style={[styles.previewTitle, { color: textColor }]}>
+                {capturedImage!.source === 'camera' ? 'Foto capturada' : 'Imagem selecionada'}
+              </Text>
+              <Text style={[styles.previewSubtitle, { color: mutedColor }]}>
+                Arraste para ajustar o enquadramento
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.previewConfirmButton, { backgroundColor: primaryColor }, isConfirming && { opacity: 0.8 }]}
+                onPress={handleConfirmImage}
+                activeOpacity={0.85}
+                disabled={isConfirming || isRecognizing}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                {isConfirming || isRecognizing ? (
+                  <ActivityIndicator size="small" color={primaryForegroundColor} />
+                ) : (
+                  <Icon name={isOnline ? Search : Download} size={22} color={primaryForegroundColor} />
+                )}
+                <Text style={[styles.previewConfirmText, { color: primaryForegroundColor }]}>
+                  {isConfirming || isRecognizing ? 'Aguarde...' : isOnline ? 'Analisar imagem' : 'Salvar na galeria'}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.previewSecondaryRow}>
+                <TouchableOpacity
+                  style={[styles.previewSecondaryButton, { backgroundColor: cardColor }]}
+                  onPress={handleRetakeOrReselect}
+                  activeOpacity={0.7}
+                >
+                  <Icon name={RefreshCw} size={16} color={textColor} />
+                  <Text style={[styles.previewSecondaryText, { color: textColor }]}>
+                    {capturedImage!.source === 'camera' ? 'Tirar outra' : 'Escolher outra'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.previewSecondaryButton, { backgroundColor: cardColor }]}
+                  onPress={handleDiscardImage}
+                  activeOpacity={0.7}
+                >
+                  <Icon name={X} size={16} color="#EF4444" />
+                  <Text style={[styles.previewSecondaryText, { color: '#EF4444' }]}>Descartar</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         ) : (
@@ -384,7 +539,7 @@ export default function ReconhecimentoScreen() {
         )}
       </View>
 
-      {!showingGalleryPreview && (
+      {!showingPreview && (
         <View style={styles.actionsSection}>
           <TouchableOpacity
             style={[styles.mainButton, { backgroundColor: primaryColor }]}
@@ -412,26 +567,28 @@ export default function ReconhecimentoScreen() {
         </View>
       )}
 
-      <View style={styles.featuresSection}>
-        <View style={[styles.featureCard, { backgroundColor: cardColor }]}>
-          <View style={[styles.featureIcon, { backgroundColor: palette.gold + '20' }]}>
-            <Icon name={Zap} size={18} color={palette.gold} />
+      {!showingPreview && (
+        <View style={styles.featuresSection}>
+          <View style={[styles.featureCard, { backgroundColor: cardColor }]}>
+            <View style={[styles.featureIcon, { backgroundColor: palette.gold + '20' }]}>
+              <Icon name={Zap} size={18} color={palette.gold} />
+            </View>
+            <View style={styles.featureText}>
+              <Text style={[styles.featureTitle, { color: textColor }]}>Identificação Rápida</Text>
+              <Text style={[styles.featureDescription, { color: mutedColor }]}>Resultado em segundos</Text>
+            </View>
           </View>
-          <View style={styles.featureText}>
-            <Text style={[styles.featureTitle, { color: textColor }]}>Identificação Rápida</Text>
-            <Text style={[styles.featureDescription, { color: mutedColor }]}>Resultado em segundos</Text>
+          <View style={[styles.featureCard, { backgroundColor: cardColor }]}>
+            <View style={[styles.featureIcon, { backgroundColor: '#10B981' + '20' }]}>
+              <Icon name={Target} size={18} color="#10B981" />
+            </View>
+            <View style={styles.featureText}>
+              <Text style={[styles.featureTitle, { color: textColor }]}>Alta Precisão</Text>
+              <Text style={[styles.featureDescription, { color: mutedColor }]}>IA treinada com +1000 pragas</Text>
+            </View>
           </View>
         </View>
-        <View style={[styles.featureCard, { backgroundColor: cardColor }]}>
-          <View style={[styles.featureIcon, { backgroundColor: '#10B981' + '20' }]}>
-            <Icon name={Target} size={18} color="#10B981" />
-          </View>
-          <View style={styles.featureText}>
-            <Text style={[styles.featureTitle, { color: textColor }]}>Alta Precisão</Text>
-            <Text style={[styles.featureDescription, { color: mutedColor }]}>IA treinada com +1000 pragas</Text>
-          </View>
-        </View>
-      </View>
+      )}
     </View>
   );
 }
@@ -440,10 +597,17 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 60, paddingBottom: 20 },
   headerTitle: { fontSize: 28, fontWeight: '700' },
-  headerSubtitle: { fontSize: 14, marginTop: 4 },
   infoButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   offlineQueueBanner: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginHorizontal: 16, marginBottom: 12, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, gap: 8 },
   offlineQueueText: { fontSize: 13, fontWeight: '500', flex: 1 },
+  queueSection: { marginHorizontal: 16, marginBottom: 12, borderRadius: 12, borderWidth: 1, overflow: 'hidden' },
+  queueSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 14 },
+  queueSectionTitle: { fontSize: 15, fontWeight: '700' },
+  queueList: { maxHeight: 180 },
+  queueItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(0,0,0,0.08)' },
+  queueItemText: { flex: 1 },
+  queueItemLabel: { fontSize: 14, fontWeight: '600' },
+  queueItemDate: { fontSize: 12, marginTop: 2 },
   scannerSection: { flex: 1, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center' },
   scannerFrame: { width: width - 64, aspectRatio: 1, maxHeight: 320, position: 'relative', padding: 3 },
   scannerInner: { flex: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center', padding: 24 },
@@ -455,17 +619,18 @@ const styles = StyleSheet.create({
   cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
   cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
   cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
-  galleryPreviewFrame: { width: width - 64, aspectRatio: 1, maxHeight: 320, borderRadius: 16, overflow: 'hidden', borderWidth: 3 },
-  galleryPreviewImage: { width: '100%', height: '100%' },
-  galleryPreviewOverlay: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 16, paddingBottom: 20, backgroundColor: 'rgba(0,0,0,0.6)', gap: 8 },
-  galleryPreviewTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
-  galleryPreviewSubtitle: { fontSize: 13, textAlign: 'center', marginBottom: 4 },
-  galleryPreviewTitleLight: { fontSize: 16, fontWeight: '600', textAlign: 'center', color: '#FFF' },
-  galleryPreviewSubtitleLight: { fontSize: 13, textAlign: 'center', marginBottom: 4, color: 'rgba(255,255,255,0.9)' },
-  analyzeButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 12, gap: 10 },
-  analyzeButtonText: { fontSize: 17, fontWeight: '700', color: '#FFF' },
-  chooseAnotherButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, borderWidth: 1, gap: 6 },
-  chooseAnotherText: { fontSize: 14, fontWeight: '500' },
+  previewContainer: { flex: 1, width: '100%', alignItems: 'center', gap: 20 },
+  previewFrame: { width: width - 48, height: 380, borderRadius: 16, overflow: 'hidden', borderWidth: 2.5 },
+  previewScroll: { flex: 1, backgroundColor: '#1a1a1a' },
+  previewCloseButton: { position: 'absolute', top: 12, right: 12, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  previewActions: { width: '100%', paddingHorizontal: 8, alignItems: 'center', gap: 12 },
+  previewTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  previewSubtitle: { fontSize: 14, textAlign: 'center', marginBottom: 4 },
+  previewConfirmButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', paddingVertical: 16, borderRadius: 14, gap: 10 },
+  previewConfirmText: { fontSize: 17, fontWeight: '700' },
+  previewSecondaryRow: { flexDirection: 'row', gap: 12, width: '100%' },
+  previewSecondaryButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 12, gap: 6 },
+  previewSecondaryText: { fontSize: 14, fontWeight: '600' },
   actionsSection: { alignItems: 'center', paddingVertical: 24 },
   mainButton: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   secondaryActions: { flexDirection: 'row', gap: 16 },

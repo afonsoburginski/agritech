@@ -20,8 +20,12 @@ export const queryKeys = {
     all: ['scouts'] as const,
   },
   stats: {
-    dashboard: () => ['stats', 'dashboard'] as const,
-    charts: () => ['stats', 'charts'] as const,
+    dashboard: (fazendaId?: number | null) => ['stats', 'dashboard', fazendaId ?? 'all'] as const,
+    charts: (fazendaId?: number | null, chartRange?: number) => ['stats', 'charts', fazendaId ?? 'all', chartRange ?? 30] as const,
+    activities: (fazendaId?: number | null) => ['stats', 'activities', fazendaId ?? 'all'] as const,
+    talhoesList: (fazendaId?: number | null) => ['stats', 'talhoesList', fazendaId ?? 'all'] as const,
+    saude: (fazendaId?: number | null) => ['stats', 'saude', fazendaId ?? 'all'] as const,
+    saudeDaily: (fazendaId?: number | null, chartRange?: number) => ['stats', 'saudeDaily', fazendaId ?? 'all', chartRange ?? 30] as const,
   },
   profile: {
     me: () => ['profile', 'me'] as const,

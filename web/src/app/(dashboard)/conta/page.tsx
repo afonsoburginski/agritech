@@ -1,14 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useQueryClient } from '@tanstack/react-query'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
-import { UserCircle, Save, Loader2, Building2 } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Save, Loader2, Mail, Phone, CreditCard, CheckCircle } from 'lucide-react'
 import { useSupabaseQuery, supabase } from '@/hooks/use-supabase-query'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -18,15 +20,11 @@ interface MyProfile {
   email: string
   telefone: string | null
   cpf: string | null
+  created_at: string
 }
 
-interface FazendaData {
-  id: number
-  nome: string
-  cnpj: string | null
-  cidade: string | null
-  estado: string | null
-  area_total: number | null
+interface UserRole {
+  role: string
 }
 
 export default function ContaPage() {
@@ -35,15 +33,9 @@ export default function ContaPage() {
   const [cpf, setCpf] = useState('')
   const [formLoaded, setFormLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const queryClient = useQueryClient()
-
-  const [fazendaNome, setFazendaNome] = useState('')
-  const [fazendaCnpj, setFazendaCnpj] = useState('')
-  const [fazendaCidade, setFazendaCidade] = useState('')
-  const [fazendaEstado, setFazendaEstado] = useState('')
-  const [fazendaAreaTotal, setFazendaAreaTotal] = useState('')
-  const [fazendaFormLoaded, setFazendaFormLoaded] = useState(false)
 
   const { data: profile, isLoading } = useSupabaseQuery<MyProfile | null>(
     queryKeys.profile.me(),
@@ -52,61 +44,27 @@ export default function ContaPage() {
       if (!user) return null
       const { data } = await sb
         .from('profiles')
-        .select('id, nome, email, telefone, cpf')
+        .select('id, nome, email, telefone, cpf, created_at')
         .eq('id', user.id)
         .single()
       return data as MyProfile | null
     },
   )
 
-  const { data: fazenda, isLoading: fazendaLoading } = useSupabaseQuery<FazendaData | null>(
-    [...queryKeys.fazendas.all, 'mine'],
+  const { data: userRole } = useSupabaseQuery<UserRole | null>(
+    ['profile', 'role'],
     async (sb) => {
       const { data: { user } } = await sb.auth.getUser()
       if (!user) return null
-      const { data: uf } = await sb
+      const { data } = await sb
         .from('user_fazendas')
-        .select('fazenda_id')
+        .select('role')
         .eq('user_id', user.id)
         .limit(1)
         .single()
-      if (!uf) return null
-      const { data: f } = await sb
-        .from('fazendas')
-        .select('*')
-        .eq('id', uf.fazenda_id)
-        .single()
-      const faz = f as FazendaData | null
-      if (faz && !fazendaFormLoaded) {
-        setFazendaNome(faz.nome ?? '')
-        setFazendaCnpj(faz.cnpj ?? '')
-        setFazendaCidade(faz.cidade ?? '')
-        setFazendaEstado(faz.estado ?? '')
-        setFazendaAreaTotal(faz.area_total ? String(faz.area_total) : '')
-        setFazendaFormLoaded(true)
-      }
-      return faz
+      return data as UserRole | null
     },
   )
-
-  const saveFazendaMutation = useMutation({
-    mutationFn: async () => {
-      if (!fazenda) return
-      await supabase
-        .from('fazendas')
-        .update({
-          nome: fazendaNome,
-          cnpj: fazendaCnpj || null,
-          cidade: fazendaCidade || null,
-          estado: fazendaEstado || null,
-          area_total: fazendaAreaTotal ? parseFloat(fazendaAreaTotal) : null,
-        })
-        .eq('id', fazenda.id)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.fazendas.all })
-    },
-  })
 
   useEffect(() => {
     if (profile && !formLoaded) {
@@ -117,10 +75,11 @@ export default function ContaPage() {
     }
   }, [profile, formLoaded])
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault()
     setMessage(null)
     setSaving(true)
+    setSaved(false)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -138,7 +97,8 @@ export default function ContaPage() {
         .eq('id', user.id)
       if (error) throw error
       await queryClient.invalidateQueries({ queryKey: queryKeys.profile.me() })
-      setMessage({ type: 'success', text: 'Dados salvos com sucesso.' })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
     } catch (err: unknown) {
       setMessage({
         type: 'error',
@@ -149,19 +109,23 @@ export default function ContaPage() {
     }
   }
 
+  const initials = profile?.nome
+    ? profile.nome.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : '??'
+
+  const roleLabel = userRole?.role === 'owner' ? 'Proprietário' : 'Técnico'
+  const memberSince = profile?.created_at
+    ? new Date(profile.created_at).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    : '...'
+
   if (isLoading || !profile) {
     return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Conta</h1>
-          <p className="text-muted-foreground">Dados pessoais e propriedade vinculada.</p>
-        </div>
+      <div className="mx-auto max-w-2xl space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-72" />
         <Card>
-          <CardHeader>
-            <Skeleton className="h-6 w-32" />
-            <Skeleton className="h-4 w-64" />
-          </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 pt-6">
+            <Skeleton className="h-20 w-20 rounded-full mx-auto" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
@@ -172,24 +136,42 @@ export default function ContaPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Conta</h1>
-        <p className="text-muted-foreground">Dados pessoais e propriedade vinculada à sua conta.</p>
+        <h1 className="text-2xl font-bold tracking-tight">Minha conta</h1>
+        <p className="text-sm text-muted-foreground">Gerencie seus dados pessoais.</p>
       </div>
 
-      <form onSubmit={handleSubmit}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserCircle className="h-5 w-5" />
-              Dados pessoais
-            </CardTitle>
-            <CardDescription>Estes dados podem ser alterados por você a qualquer momento.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="nome">Nome</Label>
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-4">
+            <Avatar className="h-16 w-16">
+              <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-lg font-semibold truncate">{profile.nome}</h2>
+              <p className="text-sm text-muted-foreground truncate">{profile.email}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant={userRole?.role === 'owner' ? 'default' : 'secondary'} className="text-xs">
+                  {roleLabel}
+                </Badge>
+                <span className="text-xs text-muted-foreground">Membro desde {memberSince}</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold">Dados pessoais</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSaveProfile} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="nome" className="text-sm">Nome completo</Label>
               <Input
                 id="nome"
                 value={nome}
@@ -198,148 +180,67 @@ export default function ContaPage() {
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-sm flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                E-mail
+              </Label>
               <Input
                 id="email"
                 type="email"
-                value={profile.email ?? ''}
+                value={profile.email}
                 disabled
-                className="bg-muted"
-              />
-              <p className="text-xs text-muted-foreground">O e-mail não pode ser alterado nesta tela.</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="telefone">Telefone</Label>
-              <Input
-                id="telefone"
-                value={telefone}
-                onChange={(e) => setTelefone(e.target.value)}
-                placeholder="(00) 00000-0000"
+                className="bg-muted/50"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="cpf">CPF</Label>
-              <Input
-                id="cpf"
-                value={cpf}
-                onChange={(e) => setCpf(e.target.value)}
-                placeholder="000.000.000-00"
-              />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="telefone" className="text-sm flex items-center gap-1.5">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                  Telefone
+                </Label>
+                <Input
+                  id="telefone"
+                  value={telefone}
+                  onChange={(e) => setTelefone(e.target.value)}
+                  placeholder="(00) 00000-0000"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cpf" className="text-sm flex items-center gap-1.5">
+                  <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+                  CPF
+                </Label>
+                <Input
+                  id="cpf"
+                  value={cpf}
+                  onChange={(e) => setCpf(e.target.value)}
+                  placeholder="000.000.000-00"
+                />
+              </div>
             </div>
+
             {message && (
-              <p
-                className={`text-sm ${message.type === 'success' ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}
-              >
+              <p className={`text-sm ${message.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>
                 {message.text}
               </p>
             )}
-            <Button type="submit" disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" />
-                  Salvar alterações
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-      </form>
 
-      <Card className="overflow-hidden border-2 transition-shadow hover:shadow-lg">
-        <CardHeader className="bg-muted/30 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-              <Building2 className="h-6 w-6 text-primary" />
-            </div>
-            <div>
-              <CardTitle className="text-xl">Propriedade</CardTitle>
-              <CardDescription>Informações da fazenda vinculada à sua conta</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {fazendaLoading ? (
-            <div className="space-y-4">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full rounded-lg" />
-              ))}
-            </div>
-          ) : !fazenda ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 py-12 text-center">
-              <Building2 className="mb-3 h-12 w-12 text-muted-foreground/50" />
-              <p className="font-medium text-muted-foreground">Nenhuma fazenda associada</p>
-              <p className="mt-1 text-sm text-muted-foreground">Entre em contato com o administrador.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Nome da Fazenda</Label>
-                <Input
-                  value={fazendaNome}
-                  onChange={(e) => setFazendaNome(e.target.value)}
-                  placeholder="Ex: Fazenda Santa Maria"
-                  className="h-10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">CNPJ</Label>
-                <Input
-                  value={fazendaCnpj}
-                  onChange={(e) => setFazendaCnpj(e.target.value)}
-                  placeholder="00.000.000/0000-00"
-                  className="h-10 font-mono text-sm"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">Cidade</Label>
-                  <Input value={fazendaCidade} onChange={(e) => setFazendaCidade(e.target.value)} className="h-10" />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">UF</Label>
-                  <Input
-                    value={fazendaEstado}
-                    onChange={(e) => setFazendaEstado(e.target.value)}
-                    placeholder="MG"
-                    maxLength={2}
-                    className="h-10 uppercase"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Área total (hectares)</Label>
-                <Input
-                  type="number"
-                  value={fazendaAreaTotal}
-                  onChange={(e) => setFazendaAreaTotal(e.target.value)}
-                  placeholder="0.00"
-                  className="h-10"
-                  step="0.01"
-                  min={0}
-                />
-              </div>
-              <Separator className="my-4" />
-              <Button
-                type="button"
-                onClick={() => saveFazendaMutation.mutate()}
-                disabled={saveFazendaMutation.isPending}
-                className="w-full gap-2 h-11"
-              >
-                {saveFazendaMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                {saveFazendaMutation.isSuccess ? 'Salvo!' : 'Salvar alterações da propriedade'}
-              </Button>
-            </div>
-          )}
+            <Separator />
+
+            <Button type="submit" disabled={saving} className="w-full">
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : saved ? (
+                <CheckCircle className="mr-2 h-4 w-4" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {saved ? 'Salvo!' : 'Salvar dados pessoais'}
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>
