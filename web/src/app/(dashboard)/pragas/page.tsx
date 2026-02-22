@@ -180,16 +180,16 @@ export default function MonitoramentoPage() {
     }
 
     const pestsByMonthTalhao = new Map<string, number>()
-    for (const [mk, list] of byMonth.entries()) {
+    Array.from(byMonth.entries()).forEach(([mk, list]) => {
       const byT = new Map<string, number>()
       for (const s of list) {
         const tk = (s.talhoes as { nome?: string })?.nome ?? s.nome ?? String(s.id)
         byT.set(tk, (byT.get(tk) ?? 0) + (s.total_pragas || 0))
       }
-      for (const [tk, count] of byT.entries()) {
+      Array.from(byT.entries()).forEach(([tk, count]) => {
         pestsByMonthTalhao.set(`${mk}|${tk}`, count)
-      }
-    }
+      })
+    })
 
     const sorted = Array.from(byMonth.keys()).sort((a, b) => b.localeCompare(a))
 
