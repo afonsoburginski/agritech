@@ -248,11 +248,11 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         // Re-apply max/min zoom after style load (setStyle can reset them; needed for satellite tiles max zoom)
         const mz = maxZoomRef.current;
         const minz = minZoomRef.current;
-        if (mz !== undefined) {
+        if (typeof mz === 'number') {
           map.setMaxZoom(mz);
           if (map.getZoom() > mz) map.setZoom(mz);
         }
-        if (minz !== undefined) {
+        if (typeof minz === 'number') {
           map.setMinZoom(minz);
           if (map.getZoom() < minz) map.setZoom(minz);
         }
@@ -315,12 +315,11 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   // Sync maxZoom/minZoom when they change (e.g. satellite style has lower max zoom)
   useEffect(() => {
     if (!mapInstance) return;
-    if (maxZoom !== undefined) {
+    if (typeof maxZoom === 'number') {
       mapInstance.setMaxZoom(maxZoom);
-      // Clamp current zoom so we don't request tiles beyond the source's max (avoids "map data not yet available")
       if (mapInstance.getZoom() > maxZoom) mapInstance.setZoom(maxZoom);
     }
-    if (minZoom !== undefined) {
+    if (typeof minZoom === 'number') {
       mapInstance.setMinZoom(minZoom);
       if (mapInstance.getZoom() < minZoom) mapInstance.setZoom(minZoom);
     }
