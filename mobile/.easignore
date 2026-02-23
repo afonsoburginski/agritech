@@ -1,0 +1,44 @@
+# Dependencies (obrigatório: reduz archive em centenas de MB)
+node_modules
+**/node_modules
+
+# Expo / build
+.expo
+dist
+web-build
+expo-env.d.ts
+.kotlin
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.metro-health-check*
+*.tsbuildinfo
+app-example
+
+# Pastas nativas (EAS gera com prebuild)
+/ios
+/android
+
+# Debug / OS / env
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env
+.env.*
+.env*.local
+*.log
+
+# Documentação e arquivos pesados (não usados no build)
+docs
+**/docs
+*.pdf
+**/*.pdf
+*.md
+agent-tools
+.git
+.gitignore

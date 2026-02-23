@@ -1,0 +1,12 @@
+# Quando EAS é executado de mobile/, este arquivo pode ser usado se o
+# archive for montado a partir da raiz do git. Exclui o resto do monorepo.
+/web
+/INSECT12C-Dataset-main
+*.log
+.git
+.next
+out
+
+# Garante que node_modules seja ignorado em qualquer nível
+node_modules
+**/node_modules
