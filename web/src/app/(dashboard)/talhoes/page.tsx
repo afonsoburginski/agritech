@@ -24,6 +24,8 @@ import MapLibreGL from 'maplibre-gl'
 import { Map, MapControls, MapMarker, MarkerContent, useMap } from '@/components/ui/map'
 import { useSupabaseQuery, supabase } from '@/hooks/use-supabase-query'
 import { queryKeys } from '@/lib/query-keys'
+import { useJsApiLoader } from '@react-google-maps/api'
+import { GoogleMapTalhoes } from '@/components/google-map-talhoes'
 
 /* ─── types ─── */
 
@@ -78,7 +80,7 @@ const SAT_STYLE = {
       type: 'raster' as const,
       tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
       tileSize: 256,
-      maxzoom: 19,
+      maxzoom: 18,
     },
   },
   layers: [{ id: 'satellite-base', type: 'raster' as const, source: 'satellite' }],
@@ -186,6 +188,8 @@ function findTalhaoIdAtPoint(lng: number, lat: number, talhoes: TalhaoData[]): n
 
 type MapMode = 'view' | 'draw' | 'edit-shape' | 'add-point'
 
+const SATELLITE_MAX_ZOOM = 18
+
 function TalhoesMapContent({
   talhoes,
   pontos,
@@ -206,6 +210,7 @@ function TalhoesMapContent({
   onVertexDrag,
   onDrawVertexDrag,
   fazendaId,
+  satellite,
 }: {
   talhoes: TalhaoData[]
   pontos: PontoMonitoramentoData[]
@@ -226,6 +231,7 @@ function TalhoesMapContent({
   onVertexDrag: (index: number, lng: number, lat: number) => void
   onDrawVertexDrag: (index: number, lng: number, lat: number) => void
   fazendaId: number | null
+  satellite: boolean
 }) {
   const { map, isLoaded } = useMap()
   const modeRef = useRef(mode)
@@ -322,6 +328,17 @@ function TalhoesMapContent({
       } catch { /* style already removed them */ }
     }
   }, [isLoaded, map])
+
+  // Clamp zoom when in satellite mode so the tile server (ESRI) doesn't show "map data not yet available"
+  useEffect(() => {
+    if (!map || !satellite) return
+    const clamp = () => {
+      if (map.getZoom() > SATELLITE_MAX_ZOOM) map.setZoom(SATELLITE_MAX_ZOOM)
+    }
+    map.on('zoom', clamp)
+    clamp()
+    return () => { map.off('zoom', clamp) }
+  }, [map, satellite])
 
   useEffect(() => {
     if (!isLoaded || !map || !map.getSource('talhoes')) return
@@ -552,6 +569,16 @@ export default function TalhoesPage() {
   const [editCoords, setEditCoords] = useState<number[][] | null>(null)
   const [saving, setSaving] = useState(false)
 
+  // Modo visualização = sempre Google Maps (Mapa e Satélite são o mesmo mapa, só troca a camada).
+  // Desenho/edição/ponto = MapLibre (ainda não temos isso no Google).
+  const useGoogleMap = mode === 'view'
+
+  // Pré-carrega o script do Google Maps ao abrir a página para o botão Satélite trocar na hora
+  const { isLoaded: googleMapsLoaded, loadError: googleMapsLoadError } = useJsApiLoader({
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '',
+    libraries: ['drawing'],
+  })
+
   const [formNome, setFormNome] = useState('')
   const [formCultura, setFormCultura] = useState('')
   const [formColor, setFormColor] = useState('')
@@ -687,6 +714,7 @@ export default function TalhoesPage() {
   )
 
   const handleStartAddPoint = () => {
+    setSatellite(false)
     setSelectedId(null)
     setSelectedPontoId(null)
     setMode('add-point')
@@ -712,6 +740,7 @@ export default function TalhoesPage() {
   }, [])
 
   const handleStartDraw = () => {
+    setSatellite(false)
     setSelectedId(null)
     setSelectedPontoId(null)
     setMode('draw')
@@ -761,6 +790,7 @@ export default function TalhoesPage() {
     const isRingClosed =
       ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
     setEditCoords(isRingClosed ? ring.slice(0, -1) : [...ring])
+    setSatellite(false)
     setMode('edit-shape')
   }
 
@@ -823,37 +853,60 @@ export default function TalhoesPage() {
 
   return (
     <div className="relative rounded-xl overflow-hidden border" style={{ height: 'calc(100vh - 7rem)' }}>
-      <Map
-        ref={mapRef}
-        center={[-55.47, -11.77]}
-        zoom={13}
-        styles={satellite ? { light: SAT_STYLE, dark: SAT_STYLE } : undefined}
-      >
-        <MapControls position="bottom-right" showZoom />
-        <TalhoesMapContent
-          talhoes={talhoesData}
-          pontos={pontosData}
-          selectedId={selectedId}
-          selectedColorOverride={selectedId != null ? formColor : null}
-          selectedPontoId={selectedPontoId}
-          mode={mode}
-          drawVertices={drawVertices}
-          editCoords={editCoords}
-          onSelect={handleSelect}
-          onMapClick={handleMapClick}
-          onAddPointClick={handleAddPointClick}
-          onSelectPonto={handleSelectPonto}
-          onDeletePonto={handleDeletePonto}
-          onMovePonto={handleMovePonto}
-          movingPontoId={movingPontoId}
-          onPontoDragEnd={handlePontoDragEnd}
-          onVertexDrag={handleVertexDrag}
-          onDrawVertexDrag={handleDrawVertexDrag}
-          fazendaId={fazendaId}
-        />
-      </Map>
+      {useGoogleMap ? (
+        <div className="absolute inset-0">
+          <GoogleMapTalhoes
+            talhoes={talhoesData}
+            pontos={pontosData}
+            selectedId={selectedId}
+            selectedPontoId={selectedPontoId}
+            movingPontoId={movingPontoId}
+            satellite={satellite}
+            onSelectTalhao={handleSelect}
+            onSelectPonto={handleSelectPonto}
+            onMovePonto={handleMovePonto}
+            onDeletePonto={handleDeletePonto}
+            onPontoDragEnd={handlePontoDragEnd}
+            className="absolute inset-0"
+            isLoaded={googleMapsLoaded}
+            loadError={googleMapsLoadError}
+          />
+        </div>
+      ) : (
+        <Map
+          ref={mapRef}
+          center={[-55.47, -11.77]}
+          zoom={13}
+          maxZoom={satellite ? SATELLITE_MAX_ZOOM : 22}
+          styles={satellite ? { light: SAT_STYLE, dark: SAT_STYLE } : undefined}
+        >
+          <MapControls position="bottom-right" showZoom />
+          <TalhoesMapContent
+            talhoes={talhoesData}
+            pontos={pontosData}
+            selectedId={selectedId}
+            selectedColorOverride={selectedId != null ? formColor : null}
+            selectedPontoId={selectedPontoId}
+            mode={mode}
+            drawVertices={drawVertices}
+            editCoords={editCoords}
+            onSelect={handleSelect}
+            onMapClick={handleMapClick}
+            onAddPointClick={handleAddPointClick}
+            onSelectPonto={handleSelectPonto}
+            onDeletePonto={handleDeletePonto}
+            onMovePonto={handleMovePonto}
+            movingPontoId={movingPontoId}
+            onPontoDragEnd={handlePontoDragEnd}
+            onVertexDrag={handleVertexDrag}
+            onDrawVertexDrag={handleDrawVertexDrag}
+            fazendaId={fazendaId}
+            satellite={satellite}
+          />
+        </Map>
+      )}
 
-      {/* ── Top-right: satellite + fazenda ── */}
+      {/* ── Top-right: mapa/satélite + provedor + fazenda ── */}
       <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
         {fazendas && fazendas.length > 1 && (
           <Select
@@ -873,14 +926,15 @@ export default function TalhoesPage() {
         <button
           onClick={() => setSatellite(s => !s)}
           className="flex items-center gap-1.5 rounded-md border bg-background/90 backdrop-blur px-2.5 py-1.5 text-xs font-medium shadow-sm hover:bg-accent transition-colors"
+          title={satellite ? 'Ver mapa de ruas' : 'Ver imagem de satélite'}
         >
           {satellite ? <MapIconLucide className="h-3.5 w-3.5" /> : <Satellite className="h-3.5 w-3.5" />}
           {satellite ? 'Mapa' : 'Satélite'}
         </button>
       </div>
 
-      {/* ── Top-center: drawing / edit-shape toolbar ── */}
-      {mode === 'draw' && (
+      {/* ── Top-center: drawing / edit-shape toolbar (só no MapLibre) ── */}
+      {!useGoogleMap && mode === 'draw' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg border bg-background/90 backdrop-blur shadow-lg px-3 py-2">
           <div className="text-xs mr-1">
             <span className="font-semibold">Desenho</span>
@@ -898,7 +952,7 @@ export default function TalhoesPage() {
           </Button>
         </div>
       )}
-      {mode === 'edit-shape' && (
+      {!useGoogleMap && mode === 'edit-shape' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg border bg-background/90 backdrop-blur shadow-lg px-3 py-2">
           <div className="text-xs mr-1">
             <span className="font-semibold">Editando polígono</span>
@@ -915,7 +969,7 @@ export default function TalhoesPage() {
           </Button>
         </div>
       )}
-      {mode === 'add-point' && (
+      {!useGoogleMap && mode === 'add-point' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg border bg-background/90 backdrop-blur shadow-lg px-3 py-2">
           <PiSecurityCameraThin className="h-4 w-4 text-primary" />
           <span className="text-xs font-semibold">Clique no mapa para colocar câmera/armadilha</span>

@@ -702,9 +702,9 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Identificações</p>
-                <p className="text-lg font-semibold tabular-nums">
+                <div className="text-lg font-semibold tabular-nums">
                   {loadingPragas ? <Skeleton className="h-6 w-10" /> : stats.total}
-                </p>
+                </div>
                 <p className="text-[10px] text-muted-foreground">últimas 100 no filtro</p>
               </div>
             </div>
@@ -718,9 +718,9 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Alta / Crítica</p>
-                <p className="text-lg font-semibold tabular-nums text-destructive">
+                <div className="text-lg font-semibold tabular-nums text-destructive">
                   {loadingPragas ? <Skeleton className="h-6 w-10" /> : stats.alta}
-                </p>
+                </div>
                 <p className="text-[10px] text-muted-foreground">
                   {stats.total > 0 ? `${Math.round((stats.alta / stats.total) * 100)}% do total` : '—'}
                 </p>
@@ -736,9 +736,9 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Com recomendação</p>
-                <p className="text-lg font-semibold tabular-nums text-primary">
+                <div className="text-lg font-semibold tabular-nums text-primary">
                   {loadingPragas ? <Skeleton className="h-6 w-10" /> : stats.comRecomendacao}
-                </p>
+                </div>
                 <p className="text-[10px] text-muted-foreground">
                   {stats.total > 0 ? `${Math.round((stats.comRecomendacao / stats.total) * 100)}% do total` : '—'}
                 </p>

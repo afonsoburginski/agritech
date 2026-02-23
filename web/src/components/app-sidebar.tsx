@@ -94,10 +94,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     loadUser()
   }, [])
 
-  const isAdmin = user?.role === 'owner'
+  // Apenas role "admin" vê Ferramentas admin (AI Training). Não owner nem technician.
+  const isRoleAdmin = user?.role === 'admin'
+  // Usuários (adminOnly) visível para owner e admin
+  const canSeeAdminOnlyItems = user?.role === 'owner' || user?.role === 'admin'
 
   function filterItems(items: NavItem[]) {
-    return items.filter(item => !item.adminOnly || isAdmin)
+    return items.filter(item => !item.adminOnly || canSeeAdminOnlyItems)
   }
 
   async function handleLogout() {
@@ -110,7 +113,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     ? user.nome.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : 'AG'
 
-  const roleLabel = isAdmin ? 'Proprietário' : 'Técnico'
+  const roleLabel = user?.role === 'owner' ? 'Proprietário' : user?.role === 'admin' ? 'Admin' : 'Técnico'
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -176,7 +179,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {isAdmin && (
+          {isRoleAdmin && (
             <SidebarGroup>
               <SidebarGroupLabel>Ferramentas admin</SidebarGroupLabel>
               <SidebarGroupContent>

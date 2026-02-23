@@ -171,6 +171,8 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     projection,
     viewport,
     onViewportChange,
+    maxZoom,
+    minZoom,
     ...props
   },
   ref
@@ -182,7 +184,12 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
   const currentStyleRef = useRef<MapStyleOption | null>(null);
   const styleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const internalUpdateRef = useRef(false);
+  const maxZoomRef = useRef(maxZoom);
+  const minZoomRef = useRef(minZoom);
   const resolvedTheme = useResolvedTheme(themeProp);
+
+  maxZoomRef.current = maxZoom;
+  minZoomRef.current = minZoom;
 
   const isControlled = viewport !== undefined && onViewportChange !== undefined;
 
@@ -222,6 +229,8 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       attributionControl: {
         compact: true,
       },
+      ...(maxZoom !== undefined && { maxZoom }),
+      ...(minZoom !== undefined && { minZoom }),
       ...props,
       ...viewport,
     });
@@ -235,6 +244,17 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         setIsStyleLoaded(true);
         if (projection) {
           map.setProjection(projection);
+        }
+        // Re-apply max/min zoom after style load (setStyle can reset them; needed for satellite tiles max zoom)
+        const mz = maxZoomRef.current;
+        const minz = minZoomRef.current;
+        if (mz !== undefined) {
+          map.setMaxZoom(mz);
+          if (map.getZoom() > mz) map.setZoom(mz);
+        }
+        if (minz !== undefined) {
+          map.setMinZoom(minz);
+          if (map.getZoom() < minz) map.setZoom(minz);
         }
       }, 100);
     };
@@ -291,6 +311,20 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     mapInstance.jumpTo(next);
     internalUpdateRef.current = false;
   }, [mapInstance, isControlled, viewport]);
+
+  // Sync maxZoom/minZoom when they change (e.g. satellite style has lower max zoom)
+  useEffect(() => {
+    if (!mapInstance) return;
+    if (maxZoom !== undefined) {
+      mapInstance.setMaxZoom(maxZoom);
+      // Clamp current zoom so we don't request tiles beyond the source's max (avoids "map data not yet available")
+      if (mapInstance.getZoom() > maxZoom) mapInstance.setZoom(maxZoom);
+    }
+    if (minZoom !== undefined) {
+      mapInstance.setMinZoom(minZoom);
+      if (mapInstance.getZoom() < minZoom) mapInstance.setZoom(minZoom);
+    }
+  }, [mapInstance, maxZoom, minZoom]);
 
   // Handle style change
   useEffect(() => {
