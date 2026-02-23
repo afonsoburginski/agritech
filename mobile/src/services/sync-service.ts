@@ -403,7 +403,7 @@ class SyncService {
         // 3) Pragas (scout_pragas) dos scouts que já baixamos
         const { data: pragasRows, error: pragasError } = await supabase
           .from('scout_pragas')
-          .select('id, scout_id, embrapa_recomendacao_id, contagem, prioridade, data_contagem, created_at, updated_at, embrapa_recomendacoes(nome_praga)')
+          .select('id, scout_id, embrapa_recomendacao_id, contagem, prioridade, data_contagem, data_marcacao, embrapa_recomendacoes(nome_praga)')
           .in('scout_id', scoutIds)
           .order('data_contagem', { ascending: false });
 
@@ -456,8 +456,8 @@ class SyncService {
   }
 
   private mapRemotePraga(row: any, scoutId: number): any {
-    const created = row.data_contagem ? new Date(row.data_contagem).getTime() : (row.created_at ? new Date(row.created_at).getTime() : Date.now());
-    const updated = row.updated_at ? new Date(row.updated_at).getTime() : created;
+    const created = row.data_contagem ? new Date(row.data_contagem).getTime() : (row.data_marcacao ? new Date(row.data_marcacao).getTime() : Date.now());
+    const updated = row.data_marcacao ? new Date(row.data_marcacao).getTime() : created;
     const er = row.embrapa_recomendacoes ?? {};
     return {
       id: String(row.id),

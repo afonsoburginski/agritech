@@ -6,6 +6,7 @@
     "start": "expo start",
     "start:tunnel": "expo start --tunnel",
     "publish": "eas update --branch preview --message \"Atualização\"",
+    "embed-report-logo": "node scripts/embed-report-logo.js",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",

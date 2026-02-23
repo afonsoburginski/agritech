@@ -59,6 +59,15 @@ export interface PestDiseaseReportData {
   heatmapSvg?: string;
   /** Imagem base64 (data:image/jpeg;base64,...) do heatmap real capturado do app */
   heatmapImage?: string;
+  /** Logo do sistema em base64 para o header do relatório */
+  reportLogoBase64?: string | null;
+  /** Métricas do mapa de calor para cards ao lado do mapa */
+  heatmapSummary?: {
+    totalFocos: string;
+    talhoesAfetados: string;
+    nivelRiscoPredominante: string;
+    areaMaiorIncidencia: string;
+  };
 }
 
 export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): string {
@@ -125,21 +134,42 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Relatório Técnico: Monitoramento de Pragas e Doenças</title>
   <style>
+    @page { margin-top: 12mm; margin-bottom: 12mm; margin-left: 12mm; margin-right: 12mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #000; font-size: 11px; line-height: 1.5; padding: 24px 48px; background: #fff; }
-    .header-block { margin-bottom: 16px; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #000; font-size: 11px; line-height: 1.5; background: #fff; padding: 12px 24px 12px 24px; }
+    .doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #1e3a5f; }
+    .doc-header-left { display: flex; align-items: center; gap: 12px; }
+    .doc-header-logo { height: 48px; width: auto; max-width: 140px; object-fit: contain; display: block; }
+    .doc-header-brand { font-size: 18px; font-weight: 600; letter-spacing: 0.02em; }
+    .doc-header-brand-fox { color: #eab203; }
+    .doc-header-brand-fieldcore { color: #1e3a5f; }
+    .doc-header-title { font-size: 14px; font-weight: 700; color: #1e3a5f; text-transform: uppercase; letter-spacing: 0.02em; }
+    .header-block { margin-bottom: 10px; }
     .header-block p { margin-bottom: 4px; font-size: 11px; color: #000; }
-    .intro { margin-bottom: 12px; text-align: justify; }
-    .map-container { width: 100%; border: 1px solid #000; margin: 12px 0 20px; background: #000; overflow: hidden; border-radius: 4px; }
-    .map-container img { width: 100%; height: auto; display: block; }
+    .intro { margin-bottom: 8px; text-align: justify; }
+    .map-section-bar { font-size: 12px; font-weight: 700; color: #000; padding: 6px 0; margin: 8px 0 8px 0; border-bottom: 1px solid #e2e8f0; }
+    .map-and-data { display: flex; gap: 16px; margin: 12px 0 20px; align-items: flex-start; }
+    .map-column { flex: 1; min-width: 0; }
+    .data-column { width: 220px; flex-shrink: 0; }
+    .data-card { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+    .data-card-title { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+    .data-card-value { font-size: 13px; font-weight: 700; color: #0f172a; }
+    .data-card-note { font-size: 9px; color: #64748b; margin-top: 4px; }
+    .map-container { width: 100%; border: 1px solid #000; background: #000; overflow: hidden; border-radius: 4px; }
+    .map-container img { width: 100%; height: auto; display: block; min-height: 200px; }
     .map-container svg { width: 100%; height: 200px; display: block; }
     .map-placeholder { width: 100%; height: 180px; border: 1px solid #000; background: #fff; display: flex; align-items: center; justify-content: center; margin: 0; font-size: 11px; color: #000; }
-    .map-legend { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; font-size: 9px; color: #333; }
+    .map-legend-box { margin-top: 8px; font-size: 9px; color: #333; }
+    .map-legend-box .legend-title { font-weight: 700; margin-bottom: 4px; }
+    .map-legend-box .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+    .map-legend-box .legend-swatch { width: 14px; height: 10px; border-radius: 2px; }
+    .map-legend { display: flex; align-items: center; gap: 8px; margin: 8px 0 0 0; font-size: 9px; color: #333; }
     .map-legend-bar { height: 10px; flex: 1; border-radius: 5px; background: linear-gradient(to right, #0000FF, #0050FF, #00B4FF, #00FFB4, #00FF00, #C8FF00, #FFC800, #FF7800, #FF3200, #FF0000); }
     .map-legend span { white-space: nowrap; font-weight: 600; }
     .doc-title { font-size: 14px; font-weight: 700; text-align: center; margin: 0 0 16px 0; }
-    .section { margin-bottom: 18px; page-break-inside: avoid; }
-    .section h2 { font-size: 12px; font-weight: 700; color: #000; margin-bottom: 8px; }
+    .section { margin-bottom: 10px; page-break-inside: avoid; }
+    .section.section-first { margin-bottom: 6px; }
+    .section h2 { font-size: 12px; font-weight: 700; color: #000; margin-bottom: 6px; }
     .section h3 { font-size: 11px; font-weight: 700; color: #000; margin: 12px 0 6px; }
     .subtitle { font-size: 10px; font-weight: 600; margin: 8px 0 4px; color: #000; }
     .section-block { margin-bottom: 14px; }
@@ -164,14 +194,19 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
     .recomendacoes li { margin-bottom: 4px; }
     ul { margin-left: 18px; }
     li { margin-bottom: 2px; }
-    @media print { body { padding: 20px 44px; } .section { page-break-inside: avoid; } }
+    @media print { body { padding: 12px 24px; } .section { page-break-inside: avoid; } .map-and-data { break-inside: avoid; } }
   </style>
 </head>
 <body>
-  <h1 class="doc-title">Relatório Técnico: Monitoramento de Pragas e Doenças</h1>
+  <div class="doc-header">
+    <div class="doc-header-left">
+      ${data.reportLogoBase64 ? `<img class="doc-header-logo" src="data:image/png;base64,${data.reportLogoBase64}" alt="Logo" />` : ''}
+      <span class="doc-header-brand"><span class="doc-header-brand-fox">FOX</span><span class="doc-header-brand-fieldcore">FIELDCORE</span></span>
+    </div>
+    <div class="doc-header-title">Relatório de Pragas e Doenças</div>
+  </div>
 
   <div class="header-block">
-    <p><strong>Aplicativo:</strong> ${data.aplicativo}</p>
     <p><strong>Propriedade:</strong> ${data.fazendaNome}</p>
     <p><strong>Área Monitorada:</strong> ${data.areaMonitorada} ha</p>
     <p><strong>Data do Relatório:</strong> ${data.dataRelatorio}</p>
@@ -184,7 +219,7 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
     de calor, identificar focos e recomendar ações corretivas.
   </p>
 
-  <div class="section">
+  <div class="section section-first">
     <h2>1. Resumo Executivo</h2>
     <p style="margin-bottom: 4px;"><strong>Principais Destaques</strong></p>
     <ul class="resumo-list">
@@ -197,34 +232,57 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
   </div>
 
   <div class="section">
-    <h2>2. Mapa de Calor: Distribuição das Infestações</h2>
-    <ul class="legend-list">
-      <li>Vermelho: Alto risco</li>
-      <li>Laranja: Médio risco</li>
-      <li>Amarelo: Baixo risco</li>
-      <li>Verde: Área estável</li>
-    </ul>
-    <p style="margin-top: 8px; margin-bottom: 4px;"><strong>Observações Técnicas</strong></p>
-    <ul class="legend-list">
-      <li>Área de maior incidência: ${data.observacoesTecnicas.areaMaiorIncidencia}</li>
-      <li>Tendência nas últimas 48h: ${data.observacoesTecnicas.tendencia48h}</li>
-      <li>Condições climáticas correlacionadas: ${data.observacoesTecnicas.condicoesClimaticas}</li>
-    </ul>
-    <p class="intro" style="margin-top: 10px;">
-      O mapa abaixo demonstra a intensidade de ocorrência de pragas e doenças detectadas pelo ${data.aplicativo}. As cores representam os níveis de risco:
-    </p>
-    <div class="map-container">${
+    <h2 class="map-section-bar">2. Mapa de Calor: Distribuição das Infestações</h2>
+    <div class="map-and-data">
+      <div class="map-column">
+        <p style="margin-bottom: 8px; font-size: 10px;">O mapa indica a intensidade de ocorrência de pragas e doenças detectadas pelo ${data.aplicativo}. Cores mais quentes (vermelho) indicam maior concentração.</p>
+        <div class="map-container">${
       data.heatmapImage
         ? `<img src="${data.heatmapImage}" alt="Mapa de calor" />`
         : data.heatmapSvg
           ? data.heatmapSvg
           : '<div class="map-placeholder">[Inserir mapa de calor gerado pelo aplicativo]</div>'
     }</div>
-    <div class="map-legend">
-      <span>Baixa</span>
-      <div class="map-legend-bar"></div>
-      <span>Alta</span>
+        <div class="map-legend-box">
+          <div class="legend-title">Legenda</div>
+          <div class="map-legend">
+            <span>Baixa incidência</span>
+            <div class="map-legend-bar"></div>
+            <span>Alta incidência</span>
+          </div>
+          <div class="legend-item"><span class="legend-swatch" style="background: #0000FF;"></span> Baixo risco</div>
+          <div class="legend-item"><span class="legend-swatch" style="background: #FFC800;"></span> Médio risco</div>
+          <div class="legend-item"><span class="legend-swatch" style="background: #FF0000;"></span> Alto risco</div>
+        </div>
+      </div>
+      <div class="data-column">${data.heatmapSummary ? `
+        <div class="data-card">
+          <div class="data-card-title">Total de focos detectados</div>
+          <div class="data-card-value">${data.heatmapSummary.totalFocos}</div>
+          <div class="data-card-note">Período do relatório</div>
+        </div>
+        <div class="data-card">
+          <div class="data-card-title">Talhões com detecção</div>
+          <div class="data-card-value">${data.heatmapSummary.talhoesAfetados}</div>
+          <div class="data-card-note">Áreas monitoradas</div>
+        </div>
+        <div class="data-card">
+          <div class="data-card-title">Nível de risco predominante</div>
+          <div class="data-card-value">${data.heatmapSummary.nivelRiscoPredominante}</div>
+        </div>
+        <div class="data-card">
+          <div class="data-card-title">Área de maior incidência</div>
+          <div class="data-card-value">${data.heatmapSummary.areaMaiorIncidencia}</div>
+          <div class="data-card-note">Recomenda-se atenção prioritária</div>
+        </div>
+      ` : ''}</div>
     </div>
+    <p style="margin-top: 12px; margin-bottom: 4px;"><strong>Observações Técnicas</strong></p>
+    <ul class="legend-list">
+      <li>Área de maior incidência: ${data.observacoesTecnicas.areaMaiorIncidencia}</li>
+      <li>Tendência nas últimas 48h: ${data.observacoesTecnicas.tendencia48h}</li>
+      <li>Condições climáticas: ${data.observacoesTecnicas.condicoesClimaticas}</li>
+    </ul>
   </div>
 
   <div class="section">
@@ -273,10 +331,10 @@ export function generatePestDiseaseReportHTML(data: PestDiseaseReportData): stri
   <div class="section">
     <h2>8. Assinatura e Validação</h2>
     <table class="assinatura-table">
-      <tr><td class="label-cell">Responsável Técnico</td><td>____________________________</td></tr>
-      <tr><td class="label-cell">Engenheiro Agrônomo</td><td>____________________________</td></tr>
-      <tr><td class="label-cell">CREA / Registro Profissional</td><td>____________________________</td></tr>
-      <tr><td class="label-cell">Data da Assinatura</td><td>____________________________</td></tr>
+      <tr><td class="label-cell">Responsável Técnico</td><td>&nbsp;</td></tr>
+      <tr><td class="label-cell">Engenheiro Agrônomo</td><td>&nbsp;</td></tr>
+      <tr><td class="label-cell">CREA / Registro Profissional</td><td>&nbsp;</td></tr>
+      <tr><td class="label-cell">Data da Assinatura</td><td>&nbsp;</td></tr>
     </table>
   </div>
 </body>

@@ -18,7 +18,7 @@ const CAPTURE_W = 1280;
 const CAPTURE_H = 720;
 const CAPTURE_TIMEOUT_MS = 25_000;
 
-const ESRI_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const ESRI_TILE = 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}';
 
 interface HeatmapCaptureProps {
   onCapture: (base64DataUrl: string) => void;
@@ -103,13 +103,13 @@ function getCaptureHTML(
       var allBounds = [];
 
       talhoes.forEach(function(t) {
+        var tColor = t.color || '#22c55e';
         var poly = L.polygon(t.coords, {
-          color: 'rgba(255,255,255,0.7)',
+          color: tColor,
           weight: 2.5,
           opacity: 0.9,
-          fillColor: t.color || '#e5e7eb',
-          fillOpacity: 0.10,
-          dashArray: '6,4'
+          fillColor: tColor,
+          fillOpacity: 0.2
         }).addTo(map);
 
         allBounds = allBounds.concat(t.coords);

@@ -1,10 +1,13 @@
 import { useState, useCallback, useRef } from 'react';
-import { StyleSheet, TouchableOpacity, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, TouchableOpacity, Alert, ActivityIndicator, ScrollView, InteractionManager } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as FileSystem from 'expo-file-system';
+import { Asset } from 'expo-asset';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { AppHeader } from '@/components/app-header';
 import { useColor } from '@/hooks/useColor';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuthFazendaPadrao } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import { useEffectiveAvatarUri } from '@/stores/auth-store';
@@ -30,6 +33,22 @@ import {
 import { HeatmapCapture } from '@/components/maps/heatmap-capture';
 import { logger } from '@/services/logger';
 
+const logoAsset = require('../../../assets/images/logo.png');
+const HEADER_GREEN = palette.darkGreen;
+
+async function loadLogoBase64(): Promise<string | null> {
+  try {
+    const asset = Asset.fromModule(logoAsset);
+    await asset.downloadAsync();
+    const uri = asset.localUri ?? asset.uri;
+    if (!uri) return null;
+    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+    return base64 && base64.length > 0 ? base64 : null;
+  } catch {
+    return null;
+  }
+}
+
 interface GeneratedReport {
   uri: string;
   type: ReportType;
@@ -46,6 +65,12 @@ export default function RelatoriosScreen() {
   const mutedColor = useColor({}, 'textMuted');
   const primaryColor = useColor({}, 'primary');
   const borderColor = useColor({}, 'border');
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
+  const technicalAccent = isDark ? '#86efac' : HEADER_GREEN;
+  const pestAccent = palette.gold;
+  const actionAccent = isDark ? '#86efac' : HEADER_GREEN;
 
   const fazenda = useAuthFazendaPadrao();
   const [isGenerating, setIsGenerating] = useState<ReportType | null>(null);
@@ -53,21 +78,26 @@ export default function RelatoriosScreen() {
   const [isCapturing, setIsCapturing] = useState(false);
   const captureResolveRef = useRef<((base64: string | null) => void) | null>(null);
 
-  const finishReport = useCallback(async (result: { uri: string; type: ReportType }) => {
+  const finishReport = useCallback((result: { uri: string; type: ReportType }) => {
     setReports(prev => [{
       ...result,
       generatedAt: new Date().toLocaleString('pt-BR'),
     }, ...prev]);
 
-    Alert.alert(
-      'Relatório Gerado',
-      'O que deseja fazer?',
-      [
-        { text: 'Visualizar', onPress: () => previewReport(result.uri) },
-        { text: 'Compartilhar', onPress: () => shareReport(result.uri).catch(() => Alert.alert('Erro', 'Não foi possível compartilhar')) },
-        { text: 'OK', style: 'cancel' },
-      ],
-    );
+    // Adia o alerta para quando a Activity estiver anexada (evita "not attached to an Activity" no Android após gerar PDF)
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        Alert.alert(
+          'Relatório Gerado',
+          'O que deseja fazer?',
+          [
+            { text: 'Visualizar', onPress: () => previewReport(result.uri) },
+            { text: 'Compartilhar', onPress: () => shareReport(result.uri).catch(() => Alert.alert('Erro', 'Não foi possível compartilhar')) },
+            { text: 'OK', style: 'cancel' },
+          ],
+        );
+      }, 200);
+    });
   }, []);
 
   const handleHeatmapCapture = useCallback((base64: string) => {
@@ -92,19 +122,27 @@ export default function RelatoriosScreen() {
     try {
       setIsGenerating(type);
 
+      setIsCapturing(true);
+      const heatmapImage = await new Promise<string | null>((resolve) => {
+        captureResolveRef.current = resolve;
+      });
+
+      const logoBase64 = await loadLogoBase64();
+
       if (type === 'technical') {
-        const result = await generateTechnicalReport(Number(fazenda.id), 'Responsável Técnico');
+        const result = await generateTechnicalReport(
+          Number(fazenda.id),
+          'Responsável Técnico',
+          heatmapImage ?? undefined,
+          logoBase64,
+        );
         await finishReport(result);
       } else {
-        setIsCapturing(true);
-        const heatmapImage = await new Promise<string | null>((resolve) => {
-          captureResolveRef.current = resolve;
-        });
-
         const result = await generatePestDiseaseReport(
           Number(fazenda.id),
           'Responsável Técnico',
           heatmapImage ?? undefined,
+          logoBase64,
         );
         await finishReport(result);
       }
@@ -166,8 +204,8 @@ export default function RelatoriosScreen() {
           activeOpacity={0.7}
           disabled={isGenerating !== null}
         >
-          <View style={[styles.reportIconBg, { backgroundColor: '#166534' + '15' }]}>
-            <Icon name={FileText} size={28} color="#166534" />
+          <View style={[styles.reportIconBg, { backgroundColor: technicalAccent + '20' }]}>
+            <Icon name={FileText} size={28} color={technicalAccent} />
           </View>
           <View style={styles.reportCardContent}>
             <Text style={[styles.reportCardTitle, { color: textColor }]}>
@@ -177,13 +215,13 @@ export default function RelatoriosScreen() {
               Monitoramento manual com inspeções visuais, mapa de distribuição e recomendações AGROFIT
             </Text>
             <View style={styles.reportCardTags}>
-              <View style={[styles.tag, { backgroundColor: '#166534' + '15' }]}>
-                <Icon name={Leaf} size={10} color="#166534" />
-                <Text style={[styles.tagText, { color: '#166534' }]}>Embrapa</Text>
+              <View style={[styles.tag, { backgroundColor: technicalAccent + '20' }]}>
+                <Icon name={Leaf} size={10} color={technicalAccent} />
+                <Text style={[styles.tagText, { color: technicalAccent }]}>Embrapa</Text>
               </View>
-              <View style={[styles.tag, { backgroundColor: palette.gold + '20' }]}>
-                <Icon name={BarChart3} size={10} color={palette.gold} />
-                <Text style={[styles.tagText, { color: palette.gold }]}>Comparativo</Text>
+              <View style={[styles.tag, { backgroundColor: pestAccent + '20' }]}>
+                <Icon name={BarChart3} size={10} color={pestAccent} />
+                <Text style={[styles.tagText, { color: pestAccent }]}>Comparativo</Text>
               </View>
             </View>
           </View>
@@ -201,8 +239,8 @@ export default function RelatoriosScreen() {
           activeOpacity={0.7}
           disabled={isGenerating !== null}
         >
-          <View style={[styles.reportIconBg, { backgroundColor: '#9333ea' + '15' }]}>
-            <Icon name={Bug} size={28} color="#9333ea" />
+          <View style={[styles.reportIconBg, { backgroundColor: pestAccent + '20' }]}>
+            <Icon name={Bug} size={28} color={pestAccent} />
           </View>
           <View style={styles.reportCardContent}>
             <Text style={[styles.reportCardTitle, { color: textColor }]}>
@@ -212,12 +250,12 @@ export default function RelatoriosScreen() {
               Monitoramento automatizado com sensores e IA, mapa de calor e produtos recomendados
             </Text>
             <View style={styles.reportCardTags}>
-              <View style={[styles.tag, { backgroundColor: '#9333ea' + '15' }]}>
-                <Icon name={Bug} size={10} color="#9333ea" />
-                <Text style={[styles.tagText, { color: '#9333ea' }]}>Sensores + IA</Text>
+              <View style={[styles.tag, { backgroundColor: pestAccent + '20' }]}>
+                <Icon name={Bug} size={10} color={pestAccent} />
+                <Text style={[styles.tagText, { color: pestAccent }]}>Sensores + IA</Text>
               </View>
-              <View style={[styles.tag, { backgroundColor: '#dc2626' + '15' }]}>
-                <Text style={[styles.tagText, { color: '#dc2626' }]}>Mapa de calor</Text>
+              <View style={[styles.tag, { backgroundColor: technicalAccent + '20' }]}>
+                <Text style={[styles.tagText, { color: technicalAccent }]}>Mapa de calor</Text>
               </View>
             </View>
           </View>
@@ -242,7 +280,7 @@ export default function RelatoriosScreen() {
                 <Icon
                   name={report.type === 'technical' ? FileText : Bug}
                   size={18}
-                  color={report.type === 'technical' ? '#166534' : '#9333ea'}
+                  color={report.type === 'technical' ? technicalAccent : pestAccent}
                 />
                 <View style={styles.historyInfo}>
                   <Text style={[styles.historyTitle, { color: textColor }]}>
@@ -261,10 +299,10 @@ export default function RelatoriosScreen() {
                   <Icon name={Eye} size={16} color={primaryColor} />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.historyButton, { backgroundColor: '#10B981' + '15' }]}
+                  style={[styles.historyButton, { backgroundColor: actionAccent + '20' }]}
                   onPress={() => handleShare(report.uri)}
                 >
-                  <Icon name={Share2} size={16} color="#10B981" />
+                  <Icon name={Share2} size={16} color={actionAccent} />
                 </TouchableOpacity>
               </View>
             </View>

@@ -67,12 +67,13 @@ export default function RootLayout() {
           }
         }, 2000);
 
-        // 5. Carregar contador da fila de reconhecimento (offline)
+        // 5. Carregar contador da fila de reconhecimento (offline; pode falhar se WatermelonDB não estiver pronto)
         if (mounted) {
           try {
             await refreshPendingRecognitionCount();
-          } catch (e) {
-            logger.warn('Erro ao carregar fila de reconhecimento', { error: e });
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            logger.warn('Erro ao carregar fila de reconhecimento', { error: msg || 'unknown' });
           }
         }
 

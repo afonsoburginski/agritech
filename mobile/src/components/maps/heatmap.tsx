@@ -1,7 +1,6 @@
 /**
- * Componente de Mapa de Calor usando Leaflet + leaflet.heat
+ * Componente de Mapa de Calor: Leaflet + leaflet.heat (manchas) e tiles Google/OSM
  * Cores vibrantes e realistas (azul → verde → amarelo → laranja → vermelho)
- * Localização: Região rural próxima a Sinop, Mato Grosso
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -11,7 +10,8 @@ import { WebView } from 'react-native-webview';
 import { View } from '@/components/ui/view';
 import { Text } from '@/components/ui/text';
 import { useColor } from '@/hooks/useColor';
-import { useSupabaseHeatmap, useSupabaseTalhoesForMap } from '@/hooks/use-supabase-data';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSupabaseHeatmap, useSupabaseTalhoesForMap, useSupabasePontosMonitoramento } from '@/hooks/use-supabase-data';
 import { useAuthFazendaPadrao } from '@/stores/auth-store';
 import { palette } from '@/theme/colors';
 import { logger } from '@/services/logger';
@@ -21,7 +21,7 @@ export type HeatmapMapType = 'satellite' | 'street';
 interface HeatmapProps {
   style?: any;
   height?: number;
-  /** 'satellite' = Esri World Imagery, 'street' = OpenStreetMap */
+  /** 'satellite' = Google Satellite, 'street' = CartoDB Dark Matter (igual Google Maps dark do web) */
   mapType?: HeatmapMapType;
 }
 
@@ -98,30 +98,33 @@ const HEAT_GRADIENT_STOPS: [number, number[]][] = [
   [1.0, [255, 0, 0]],
 ];
 
-function intensityToHex(intensity: number): string {
+function interpolateGradient(intensity: number): [number, number, number] {
   const i = Math.max(0, Math.min(1, intensity));
+  const maxIdx = HEAT_GRADIENT_STOPS.length - 1;
   let idx = 0;
-  while (idx < HEAT_GRADIENT_STOPS.length - 1 && HEAT_GRADIENT_STOPS[idx + 1][0] <= i) idx++;
-  const [t0, rgb0] = HEAT_GRADIENT_STOPS[idx];
-  const [t1, rgb1] = HEAT_GRADIENT_STOPS[idx + 1];
-  const t = (i - t0) / (t1 - t0);
+  while (idx < maxIdx - 1 && HEAT_GRADIENT_STOPS[idx + 1][0] <= i) idx++;
+  // Clamp so idx+1 is always valid
+  const clampedIdx = Math.min(idx, maxIdx - 1);
+  const stop0 = HEAT_GRADIENT_STOPS[clampedIdx];
+  const stop1 = HEAT_GRADIENT_STOPS[clampedIdx + 1];
+  const t0 = stop0[0]; const rgb0 = stop0[1];
+  const t1 = stop1[0]; const rgb1 = stop1[1];
+  const span = t1 - t0;
+  const t = span === 0 ? 0 : (i - t0) / span;
   const r = Math.round(rgb0[0] + t * (rgb1[0] - rgb0[0]));
   const g = Math.round(rgb0[1] + t * (rgb1[1] - rgb0[1]));
   const b = Math.round(rgb0[2] + t * (rgb1[2] - rgb0[2]));
+  return [r, g, b];
+}
+
+function intensityToHex(intensity: number): string {
+  const [r, g, b] = interpolateGradient(intensity);
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 /** Mesma escala do heat em rgba com transparência (para badge do talhão). */
 function intensityToRgba(intensity: number, alpha: number): string {
-  const i = Math.max(0, Math.min(1, intensity));
-  let idx = 0;
-  while (idx < HEAT_GRADIENT_STOPS.length - 1 && HEAT_GRADIENT_STOPS[idx + 1][0] <= i) idx++;
-  const [t0, rgb0] = HEAT_GRADIENT_STOPS[idx];
-  const [t1, rgb1] = HEAT_GRADIENT_STOPS[idx + 1];
-  const t = (i - t0) / (t1 - t0);
-  const r = Math.round(rgb0[0] + t * (rgb1[0] - rgb0[0]));
-  const g = Math.round(rgb0[1] + t * (rgb1[1] - rgb0[1]));
-  const b = Math.round(rgb0[2] + t * (rgb1[2] - rgb0[2]));
+  const [r, g, b] = interpolateGradient(intensity);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
@@ -163,25 +166,28 @@ export function spreadPointsInsideTalhoes(
   points: { lat: number; lng: number; intensity: number; pragaNome?: string; talhaoId?: number }[],
   talhoes: { id: number; nome: string; coords: number[][] }[]
 ): { lat: number; lng: number; intensity: number; pragaNome?: string }[] {
-  const byId = new Map(talhoes.map((t) => [t.id, t]));
+  const byId: Record<number, { id: number; nome: string; coords: number[][] }> = {};
+  talhoes.forEach((t) => { byId[t.id] = t; });
 
   const withTalhao = points.filter((p) => p.talhaoId != null);
   const withoutTalhao = points.filter((p) => p.talhaoId == null);
 
-  const byTalhao = new Map<number, typeof points>();
-  for (const p of withTalhao) {
+  const byTalhao: Record<number, typeof points> = {};
+  withTalhao.forEach((p) => {
     const id = p.talhaoId!;
-    if (!byTalhao.has(id)) byTalhao.set(id, []);
-    byTalhao.get(id)!.push(p);
-  }
+    if (!byTalhao[id]) byTalhao[id] = [];
+    byTalhao[id].push(p);
+  });
 
-  const result: { lat: number; lng: number; intensity: number; pragaNome?: string }[] = [...withoutTalhao.map((p) => ({ lat: p.lat, lng: p.lng, intensity: p.intensity, pragaNome: p.pragaNome }))];
+  const result: { lat: number; lng: number; intensity: number; pragaNome?: string }[] = withoutTalhao.map((p) => ({ lat: p.lat, lng: p.lng, intensity: p.intensity, pragaNome: p.pragaNome }));
 
-  for (const [talhaoId, group] of byTalhao) {
-    const talhao = byId.get(talhaoId);
+  Object.keys(byTalhao).forEach((key) => {
+    const talhaoId = Number(key);
+    const group = byTalhao[talhaoId];
+    const talhao = byId[talhaoId];
     if (!talhao || talhao.coords.length < 3) {
       group.forEach((p) => result.push({ lat: p.lat, lng: p.lng, intensity: p.intensity, pragaNome: p.pragaNome }));
-      continue;
+      return;
     }
 
     const centroid = polygonCentroid(talhao.coords);
@@ -194,7 +200,7 @@ export function spreadPointsInsideTalhoes(
       const lng = centroid.lng + radius * Math.sin(angle);
       result.push({ lat, lng, intensity: p.intensity, pragaNome: p.pragaNome });
     });
-  }
+  });
 
   return result;
 }
@@ -230,13 +236,17 @@ export function getHeatmapSVG(
   const polygonPoints = (coords: number[][]) =>
     coords.map((c) => `${scaleX(c[1])},${scaleY(c[0])}`).join(' ');
 
-  // Talhões: borda cinza perto do preto, preenchimento discreto
   const polygons = talhoes
     .map((t) => {
-      const fill = t.color ?? '#e5e7eb';
-      return `<polygon points="${polygonPoints(t.coords)}" fill="${fill}" fill-opacity="0.12" stroke="#374151" stroke-width="1.5" stroke-opacity="0.9" />`;
+      const fill = t.color ?? '#22c55e';
+      return `<polygon points="${polygonPoints(t.coords)}" fill="${fill}" fill-opacity="0.2" stroke="${fill}" stroke-width="2.5" stroke-opacity="0.9" />`;
     })
     .join('\n');
+
+  // Normaliza intensidades relativas ao range real (igual ao componente interativo)
+  const maxI = data.length > 0 ? Math.max(...data.map((p) => p.intensity)) : 1;
+  const minI = data.length > 0 ? Math.min(...data.map((p) => p.intensity)) : 0;
+  const normalizeI = (i: number) => maxI === minI ? 0.5 : (i - minI) / (maxI - minI);
 
   // Ordenar por intensidade (menor primeiro) para desenhar por cima os pontos mais intensos, como no heat layer
   const sorted = [...data].sort((a, b) => a.intensity - b.intensity);
@@ -245,15 +255,16 @@ export function getHeatmapSVG(
   const radiusMin = 52;
   const radiusMax = 115;
   const circleR = (intensity: number) => radiusMin + intensity * (radiusMax - radiusMin);
-  const minOpacity = 0.7;
+  const minOpacity = 0.5;
 
   const circles = sorted
     .map((p) => {
+      const ni = normalizeI(p.intensity);
       const x = scaleX(p.lng);
       const y = scaleY(p.lat);
-      const r = circleR(p.intensity);
-      const fill = intensityToHex(p.intensity);
-      const opacity = minOpacity + p.intensity * 0.25;
+      const r = circleR(ni);
+      const fill = intensityToHex(ni);
+      const opacity = minOpacity + ni * 0.65;
       return `<circle cx="${x}" cy="${y}" r="${r}" fill="${fill}" fill-opacity="${opacity}" filter="url(#heatBlur)" />`;
     })
     .join('\n');
@@ -271,26 +282,38 @@ export function getHeatmapSVG(
 }
 
 type HeatmapTalhao = { nome: string; color?: string; coords: number[][] };
+type HeatmapPonto = { id: number; nome: string; lat: number; lng: number };
 
 const TILE_LAYERS = {
-  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  street: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  satellite: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+  // dark: CartoDB Dark Matter | light: Google Maps Roadmap
+  streetDark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  streetLight: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
 };
+
+/** SVG path do ícone de câmera de segurança (Phosphor PiSecurityCameraThin) */
+const CAMERA_SVG_PATH =
+  'M248,140a4,4,0,0,0-4,4v20H195.31a4,4,0,0,1-2.82-1.17l-21.18-21.17,53.18-53.17a12,12,0,0,0,0-17l-56-56a12,12,0,0,0-17,0L5.76,161.76A6,6,0,0,0,10,172H51l36.48,36.49a12,12,0,0,0,17,0l61.18-61.18,21.17,21.17a11.9,11.9,0,0,0,8.48,3.52H244v20a4,4,0,0,0,8,0V144A4,4,0,0,0,248,140ZM157.17,21.17a4.1,4.1,0,0,1,5.66,0l15.51,15.52L51,164H14.82ZM98.83,202.83a4.1,4.1,0,0,1-5.66,0L58.34,168,184,42.34l34.83,34.83a4,4,0,0,1,0,5.66Z';
 
 function getHeatmapHTML(
   data: { lat: number; lng: number; intensity: number }[],
   talhoes: HeatmapTalhao[],
   center: { lat: number; lng: number },
-  mapType: 'satellite' | 'street' = 'satellite'
+  mapType: 'satellite' | 'street' = 'satellite',
+  pontos: HeatmapPonto[] = [],
+  isDark: boolean = true,
+  mapBgColor: string = '#1a1a1a'
 ) {
   const heatData = JSON.stringify(data.map((d) => [d.lat, d.lng, d.intensity]));
-  const talhoesWithIncidence = talhoes.map((t) => ({
-    ...t,
-    incidenceRgbaBg: talhaoIncidenceRgba(t, data, 0.22),
-    incidenceRgbaBorder: talhaoIncidenceRgba(t, data, 0.5),
-  }));
-  const talhoesData = JSON.stringify(talhoesWithIncidence);
-  const tileUrl = TILE_LAYERS[mapType];
+  const talhoesData = JSON.stringify(talhoes.map((t) => ({
+    nome: t.nome,
+    color: t.color ?? '#22c55e',
+    coords: t.coords,
+  })));
+  const pontosData = JSON.stringify(pontos);
+  const tileUrl = mapType === 'satellite'
+    ? TILE_LAYERS.satellite
+    : (isDark ? TILE_LAYERS.streetDark : TILE_LAYERS.streetLight);
 
   return `
 <!DOCTYPE html>
@@ -301,30 +324,29 @@ function getHeatmapHTML(
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, #map { width: 100%; height: 100%; overflow: hidden; }
+    html, body, #map { width: 100%; height: 100%; overflow: hidden; background-color: ${mapBgColor}; -webkit-tap-highlight-color: transparent; }
     .leaflet-control-attribution { display: none !important; }
     .leaflet-control-zoom { display: none !important; }
-    /* Pointer nos talhões (paths dos polígonos; o heat é canvas) */
     .leaflet-pane path.leaflet-interactive { cursor: pointer; }
-    .talhao-tooltip {
+    #talhao-badge {
+      position: absolute;
+      background: rgba(0,0,0,0.5);
       border-radius: 999px;
-      border-width: 1px;
-      border-style: solid;
-      background: rgba(45,55,72,0.22) !important;
-      border-color: rgba(255,255,255,0.4) !important;
-      color: white;
-      font-size: 12px;
+      color: #fff;
+      font-size: 11px;
       font-weight: 600;
-      padding: 6px 12px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+      padding: 4px 10px;
       white-space: nowrap;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      pointer-events: none;
+      z-index: 1000;
+      transform: translate(-50%, -50%);
+      display: none;
     }
-    .talhao-tooltip::before { display: none; }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="talhao-badge"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
   <script>
@@ -338,74 +360,100 @@ function getHeatmapHTML(
         doubleClickZoom: true
       }).setView([${center.lat}, ${center.lng}], 14);
 
-      // Base: satélite (Esri) ou rua (OSM)
       L.tileLayer('${tileUrl}', {
         maxZoom: 19,
         attribution: ''
       }).addTo(map);
 
-      // Dados dos talhões
       const talhoes = ${talhoesData};
 
-      // Badge ao clicar: nome do talhão, fundo = cor da incidência (com transparência)
-      var currentTooltipLayer = null;
-      talhoes.forEach(talhao => {
-        const polygon = L.polygon(talhao.coords, {
-          color: '#374151',
-          weight: 1.5,
+      var badge = document.getElementById('talhao-badge');
+      var selectedPolygon = null;
+
+      function showBadge(name, latlng) {
+        var pt = map.latLngToContainerPoint(latlng);
+        badge.textContent = name;
+        badge.style.left = pt.x + 'px';
+        badge.style.top = pt.y + 'px';
+        badge.style.display = 'block';
+      }
+
+      function hideBadge() {
+        badge.style.display = 'none';
+        selectedPolygon = null;
+      }
+
+      talhoes.forEach(function(talhao) {
+        var tColor = talhao.color || '#22c55e';
+        var polygon = L.polygon(talhao.coords, {
+          color: tColor,
+          weight: 2.5,
           opacity: 0.9,
-          fillColor: talhao.color,
-          fillOpacity: 0.12
+          fillColor: tColor,
+          fillOpacity: 0.2
         }).addTo(map);
 
-        polygon.bindTooltip(talhao.nome, {
-          permanent: false,
-          direction: 'center',
-          className: 'talhao-tooltip',
-          offset: [0, 0],
-          opacity: 1,
-          openDelay: 1e6
-        });
-
         polygon.on('click', function(e) {
-          if (currentTooltipLayer && currentTooltipLayer !== polygon) currentTooltipLayer.closeTooltip();
-          currentTooltipLayer = polygon;
-          var tip = polygon.getTooltip();
-          var el = tip._container;
-          el.style.background = talhao.incidenceRgbaBg || 'rgba(45,55,72,0.22)';
-          el.style.borderColor = talhao.incidenceRgbaBorder || 'rgba(255,255,255,0.4)';
-          el.style.borderWidth = '1px';
-          el.style.borderStyle = 'solid';
-          polygon.openTooltip(e.latlng);
+          L.DomEvent.stopPropagation(e);
+          if (selectedPolygon === polygon) {
+            hideBadge();
+          } else {
+            selectedPolygon = polygon;
+            showBadge(talhao.nome, e.latlng);
+          }
         });
       });
 
-      // Dados do heatmap
-      const heatData = ${heatData};
+      map.on('click', function() { hideBadge(); });
+      map.on('move', function() {
+        if (selectedPolygon) {
+          var center = selectedPolygon.getBounds().getCenter();
+          var pt = map.latLngToContainerPoint(center);
+          badge.style.left = pt.x + 'px';
+          badge.style.top = pt.y + 'px';
+        }
+      });
 
-      // Heatmap de população: pouca identificação = azul (baixo), muita = vermelho (alto)
-      var heatGradient = {
-        0.0: 'rgba(0, 0, 255, 0.8)',
-        0.08: 'rgba(0, 80, 255, 0.75)',
-        0.18: 'rgba(0, 180, 255, 0.72)',
-        0.32: 'rgba(0, 255, 180, 0.75)',
-        0.48: 'rgba(0, 255, 0, 0.8)',
-        0.62: 'rgba(200, 255, 0, 0.82)',
-        0.75: 'rgba(255, 200, 0, 0.85)',
-        0.86: 'rgba(255, 120, 0, 0.9)',
-        0.94: 'rgba(255, 50, 0, 0.95)',
-        1.0: 'rgba(255, 0, 0, 1.0)'
-      };
+      var pontosArr = ${pontosData};
+      var cameraSvgPath = '${CAMERA_SVG_PATH}';
+      pontosArr.forEach(function(p) {
+        var labelText = p.nome.length > 12 ? p.nome.slice(0, 11) + '…' : p.nome;
+        var escaped = labelText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        var svgStr = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 42" width="80" height="42">'
+          + '<rect x="27" y="0" width="26" height="26" rx="4" fill="rgba(107,114,128,0.4)" stroke="white" stroke-width="1"/>'
+          + '<g transform="translate(30,3) scale(0.078125)" fill="white"><path d="' + cameraSvgPath + '"/></g>'
+          + '<text x="40" y="38" text-anchor="middle" font-size="10" font-weight="500" fill="white" style="text-shadow:0 1px 2px rgba(0,0,0,0.5)">' + escaped + '</text>'
+          + '</svg>';
+        var iconUrl = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svgStr);
+        var icon = L.icon({
+          iconUrl: iconUrl,
+          iconSize: [80, 42],
+          iconAnchor: [40, 42],
+          popupAnchor: [0, -42]
+        });
+        L.marker([p.lat, p.lng], { icon: icon, interactive: false }).addTo(map);
+      });
+
+      const heatData = ${heatData};
       var heat = L.heatLayer(heatData, {
-        radius: 65,
-        blur: 50,
+        radius: 55,
+        blur: 40,
         maxZoom: 18,
         max: 1.0,
-        minOpacity: 0.7,
-        gradient: heatGradient
+        minOpacity: 0.5,
+        gradient: {
+          0.0:  'rgb(0, 0, 255)',
+          0.1:  'rgb(0, 80, 255)',
+          0.22: 'rgb(0, 200, 255)',
+          0.36: 'rgb(0, 255, 180)',
+          0.5:  'rgb(0, 255, 0)',
+          0.64: 'rgb(180, 255, 0)',
+          0.76: 'rgb(255, 200, 0)',
+          0.87: 'rgb(255, 100, 0)',
+          1.0:  'rgb(255, 0, 0)'
+        }
       }).addTo(map);
 
-      // Permite atualizar os dados do heatmap via injectJavaScript do React Native
       window.updateHeatData = function(newData) {
         heat.setLatLngs(newData);
       };
@@ -426,17 +474,29 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
   const [error, setError] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
   const cardColor = useColor({}, 'card');
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const mutedColor = useColor({}, 'textMuted');
 
   const fazenda = useAuthFazendaPadrao();
   const fazendaId = fazenda?.id != null ? Number(fazenda.id) : undefined;
   const { points: heatPoints, isLoading: loadingHeat, refetch: refetchHeat } = useSupabaseHeatmap(fazendaId);
   const { talhoes: talhoesFromApi, isLoading: loadingTalhoes, refetch: refetchTalhoes } = useSupabaseTalhoesForMap(fazendaId);
+  const { pontos: pontosFromApi, isLoading: loadingPontos, refetch: refetchPontos } = useSupabasePontosMonitoramento(fazendaId);
 
-  const heatData = useMemo(
-    () => spreadPointsInsideTalhoes(heatPoints, talhoesFromApi),
-    [heatPoints, talhoesFromApi]
-  );
+  const heatData = useMemo(() => {
+    const spread = spreadPointsInsideTalhoes(heatPoints, talhoesFromApi);
+    if (spread.length === 0) return spread;
+    // Normaliza intensidades relativas ao range real: mínimo → 0.0 (azul puro), máximo → 1.0 (vermelho)
+    const maxI = Math.max(...spread.map((p) => p.intensity));
+    const minI = Math.min(...spread.map((p) => p.intensity));
+    if (maxI === minI) return spread.map((p) => ({ ...p, intensity: 0.5 }));
+    return spread.map((p) => ({
+      ...p,
+      intensity: (p.intensity - minI) / (maxI - minI),
+    }));
+  }, [heatPoints, talhoesFromApi]);
+
   const talhoesData = useMemo(() => talhoesFromApi, [talhoesFromApi]);
   const center = useMemo(
     () => computeCenter(heatData, talhoesFromApi),
@@ -447,13 +507,14 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
     useCallback(() => {
       refetchHeat();
       refetchTalhoes();
-    }, [refetchHeat, refetchTalhoes])
+      refetchPontos();
+    }, [refetchHeat, refetchTalhoes, refetchPontos])
   );
 
-  const dataReady = !loadingHeat && !loadingTalhoes;
+  const dataReady = !loadingHeat && !loadingTalhoes && !loadingPontos;
   const htmlContent = useMemo(
-    () => getHeatmapHTML(heatData, talhoesData, center, mapTypeProp),
-    [heatData, talhoesData, center, mapTypeProp]
+    () => getHeatmapHTML(heatData, talhoesData, center, mapTypeProp, pontosFromApi, isDark, cardColor),
+    [heatData, talhoesData, center, mapTypeProp, pontosFromApi, isDark, cardColor]
   );
 
   // Quando dados mudam e o mapa já está carregado, injeta os novos pontos sem recriar o WebView
@@ -478,8 +539,12 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
   }
 
   return (
-    <View style={[styles.wrapper, style]}>
-      <View style={[styles.mapContainer, { height }]}>
+    <View style={[styles.wrapper, style]} collapsable={false}>
+      <View
+        style={[styles.mapContainer, { height, backgroundColor: cardColor }]}
+        collapsable={false}
+        renderToHardwareTextureAndroid={true}
+      >
         {(loading || !dataReady) && (
           <View style={[styles.loadingOverlay, { backgroundColor: cardColor }]}>
             <ActivityIndicator size="large" color={palette.gold} />
@@ -497,7 +562,7 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
           <WebView
             ref={webViewRef}
             source={{ html: htmlContent }}
-            style={[styles.webview, { opacity: dataReady && !loading ? 1 : 0 }]}
+            style={[styles.webview, { opacity: dataReady && !loading ? 1 : 0, backgroundColor: cardColor }]}
             onLoadEnd={() => {
               setTimeout(() => {
                 setLoading(false);
@@ -516,6 +581,8 @@ export function Heatmap({ style, height = 300, mapType: mapTypeProp = 'satellite
             mixedContentMode="compatibility"
             allowsInlineMediaPlayback={true}
             cacheEnabled={false}
+            androidLayerType="hardware"
+            nestedScrollEnabled={false}
           />
         )}
       </View>
@@ -558,7 +625,9 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
+    width: '100%',
     backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -575,7 +644,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   legend: {
-    padding: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
   },
   gradientBar: {
     flexDirection: 'row',
@@ -589,7 +659,7 @@ const styles = StyleSheet.create({
   legendLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
+    marginTop: 4,
   },
   legendText: {
     fontSize: 11,

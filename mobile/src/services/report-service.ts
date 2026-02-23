@@ -7,12 +7,40 @@
 
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import { Asset } from 'expo-asset';
 import { logger } from './logger';
 import { generateTechnicalReportHTML, type TechnicalReportData } from '@/templates/report-technical';
 import { generatePestDiseaseReportHTML, type PestDiseaseReportData } from '@/templates/report-pest-disease';
 import { getHeatmapSVG } from '@/components/maps/heatmap';
 import { parseTalhaoCoordinates } from '@/hooks/use-supabase-data';
 import { supabase, isSupabaseConfigured } from './supabase';
+let REPORT_LOGO_BASE64: string | null = null;
+try {
+  REPORT_LOGO_BASE64 = require('@/lib/report-logo').REPORT_LOGO_BASE64 ?? null;
+} catch {
+  REPORT_LOGO_BASE64 = null;
+}
+
+/** 1x1 PNG transparente como fallback se a logo embutida falhar */
+const TINY_LOGO_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** Carrega a logo do app em base64 (async). Fallback: REPORT_LOGO_BASE64 ou TINY_LOGO_BASE64. */
+async function getLogoBase64(): Promise<string | null> {
+  try {
+    const logoAsset = require('../../assets/images/logo.png');
+    const asset = Asset.fromModule(logoAsset);
+    await asset.downloadAsync();
+    const uri = asset.localUri ?? asset.uri;
+    if (uri) {
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as any });
+      if (base64 && base64.length > 0) return base64;
+    }
+  } catch (e) {
+    logger.warn('Logo async não carregada', { error: e });
+  }
+  return REPORT_LOGO_BASE64 || TINY_LOGO_BASE64 || null;
+}
 
 export type ReportType = 'technical' | 'pest-disease';
 
@@ -72,15 +100,15 @@ function buildReportData(
   const now = new Date();
   const dataRelatorio = now.toLocaleDateString('pt-BR');
 
-  const pragasByName = new Map<string, any[]>();
+  const pragasByName: Record<string, any[]> = {};
   for (const p of pragas) {
     const er = p.embrapa_recomendacoes ?? {};
     const name = er.nome_praga ?? 'Desconhecida';
-    if (!pragasByName.has(name)) pragasByName.set(name, []);
-    pragasByName.get(name)!.push(p);
+    if (!pragasByName[name]) pragasByName[name] = [];
+    pragasByName[name].push(p);
   }
 
-  const pragaItems = Array.from(pragasByName.entries()).map(([nome, items]) => {
+  const pragaItems = Object.entries(pragasByName).map(([nome, items]) => {
     const totalCount = items.reduce((s: number, i: any) => s + (i.contagem ?? 1), 0);
     const highPriority = items.some((i: any) => i.prioridade === 'ALTA');
     const firstEr = items[0]?.embrapa_recomendacoes ?? {};
@@ -108,16 +136,32 @@ function buildReportData(
 
   const principaisPragas = pragasList.map(p => p.nome).slice(0, 5);
   const principaisDoencas = doencasList.map(d => d.nome).slice(0, 5);
-  const areasCriticas = talhoes.filter(t => {
-    return pragas.some((p: any) => p.prioridade === 'ALTA');
-  }).map(t => t.nome).slice(0, 3);
+
+  const scouts = rawData.scouts ?? [];
+  const scoutIdsComPraga = new Set(pragas.map((p: any) => p.scout_id));
+  const talhoesIdsAfetados = new Set(scouts.filter((s: any) => scoutIdsComPraga.has(s.id)).map((s: any) => s.talhao_id).filter(Boolean));
+  const contagemPorTalhao = new Map<number, number>();
+  for (const p of pragas) {
+    const scout = scouts.find((s: any) => s.id === (p as any).scout_id);
+    const tid = scout?.talhao_id;
+    if (tid != null) {
+      contagemPorTalhao.set(tid, (contagemPorTalhao.get(tid) ?? 0) + (Number((p as any).contagem) || 1));
+    }
+  }
+  const talhoesComDetecaoOrdenados = (talhoes ?? [])
+    .filter((t: any) => talhoesIdsAfetados.has(t.id))
+    .map((t: any) => ({ nome: t.nome, id: t.id, count: contagemPorTalhao.get(t.id) ?? 0 }))
+    .sort((a, b) => b.count - a.count);
+  const areasCriticas = talhoesComDetecaoOrdenados.map((t) => t.nome).slice(0, 3);
+  const areaMaiorIncidencia = talhoesComDetecaoOrdenados.length > 0
+    ? talhoesComDetecaoOrdenados[0].nome
+    : 'Nenhuma área com incidência relevante';
 
   const nivelInfestacao = pragas.length === 0 ? 'Baixo' :
     pragas.filter((p: any) => p.prioridade === 'ALTA').length > pragas.length * 0.3 ? 'Alto' :
     pragas.filter((p: any) => p.prioridade === 'MEDIA' || p.prioridade === 'ALTA').length > pragas.length * 0.3 ? 'Moderado' : 'Baixo';
 
   const aplicativo = 'FOX-FIELDCORE';
-  const areaMaiorIncidencia = areasCriticas.length > 0 ? areasCriticas[0] : 'Nenhuma área com incidência relevante';
   const dataProximo = new Date(now);
   dataProximo.setDate(dataProximo.getDate() + 7);
   const dataProximoRelatorio = dataProximo.toLocaleDateString('pt-BR');
@@ -139,6 +183,14 @@ function buildReportData(
     const coords = parseTalhaoCoordinates(t.coordinates);
     return { nome: t.nome ?? '', color: t.color ?? undefined, coords };
   }).filter((t: { coords: number[][] }) => t.coords.length >= 3);
+
+  const totalOcorrencias = pragas.reduce((s: number, p: any) => s + (Number(p.contagem) || 1), 0);
+  const heatmapSummary = {
+    totalFocos: `${totalOcorrencias} ocorrência(s)`,
+    talhoesAfetados: talhoesIdsAfetados.size > 0 ? `${talhoesIdsAfetados.size} talhão(ões)` : 'Nenhum',
+    nivelRiscoPredominante: nivelInfestacao,
+    areaMaiorIncidencia,
+  };
 
   return {
     aplicativo,
@@ -195,6 +247,7 @@ function buildReportData(
       : `O monitoramento realizado em ${dataRelatorio} identificou ${pragas.length} ocorrência(s) de pragas/doenças na propriedade ${fazenda?.nome ?? ''}. ${principaisPragas.length > 0 ? `Principais pragas: ${principaisPragas.join(', ')}.` : ''} Recomenda-se seguir as ações de manejo indicadas e agendar novo monitoramento em 7 dias.`,
     dataProximoRelatorio,
     heatmapSvg: getHeatmapSVG(heatMapPoints, talhoesForSvg),
+    heatmapSummary,
   } as TechnicalReportData | PestDiseaseReportData;
 }
 
@@ -204,14 +257,28 @@ function buildReportData(
 export async function generateTechnicalReport(
   fazendaId: number,
   responsavel: string,
+  heatmapImageBase64?: string,
+  logoBase64?: string | null,
 ): Promise<ReportResult> {
-  logger.info('Gerando Relatório Técnico', { fazendaId });
+  logger.info('Gerando Relatório Técnico', { fazendaId, hasImage: !!heatmapImageBase64 });
 
   const rawData = await fetchReportData(fazendaId);
   const reportData = buildReportData(rawData, responsavel) as TechnicalReportData;
+
+  if (heatmapImageBase64) {
+    reportData.heatmapImage = heatmapImageBase64;
+  }
+
+  const logo = logoBase64 !== undefined ? (logoBase64 ?? null) : await getLogoBase64();
+  reportData.reportLogoBase64 = logo ?? REPORT_LOGO_BASE64 ?? TINY_LOGO_BASE64 ?? null;
+
   const html = generateTechnicalReportHTML(reportData);
 
-  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  const { uri } = await Print.printToFileAsync({
+    html,
+    base64: false,
+    margins: { left: 24, top: 32, right: 24, bottom: 32 },
+  });
   logger.info('Relatório Técnico gerado', { uri });
 
   return { uri, type: 'technical' };
@@ -221,11 +288,13 @@ export async function generateTechnicalReport(
  * Gera PDF de Relatório de Pragas e Doenças (monitoramento automatizado).
  * Se `heatmapImageBase64` for fornecido (data:image/…), usa a imagem real do heatmap
  * capturada pelo componente HeatmapCapture; caso contrário, usa SVG estático.
+ * Se `logoBase64` for fornecido, usa no header; senão tenta carregar do asset.
  */
 export async function generatePestDiseaseReport(
   fazendaId: number,
   responsavel: string,
   heatmapImageBase64?: string,
+  logoBase64?: string | null,
 ): Promise<ReportResult> {
   logger.info('Gerando Relatório de Pragas e Doenças', { fazendaId, hasImage: !!heatmapImageBase64 });
 
@@ -236,9 +305,16 @@ export async function generatePestDiseaseReport(
     reportData.heatmapImage = heatmapImageBase64;
   }
 
+  const logo = logoBase64 !== undefined ? (logoBase64 ?? null) : await getLogoBase64();
+  reportData.reportLogoBase64 = logo ?? REPORT_LOGO_BASE64 ?? TINY_LOGO_BASE64 ?? null;
+
   const html = generatePestDiseaseReportHTML(reportData);
 
-  const { uri } = await Print.printToFileAsync({ html, base64: false });
+  const { uri } = await Print.printToFileAsync({
+    html,
+    base64: false,
+    margins: { left: 24, top: 32, right: 24, bottom: 32 },
+  });
   logger.info('Relatório de Pragas e Doenças gerado', { uri });
 
   return { uri, type: 'pest-disease' };

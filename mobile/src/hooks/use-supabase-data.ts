@@ -941,6 +941,64 @@ export function useSupabaseTalhoesForMap(fazendaId?: number | null) {
   return { talhoes, isLoading, hasData: talhoes.length > 0, refetch };
 }
 
+/** Ponto de monitoramento (câmera) para exibição no mapa */
+export interface SupabasePontoMonitoramento {
+  id: number;
+  nome: string;
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Busca pontos de monitoramento (câmeras) da fazenda no Supabase.
+ */
+export function useSupabasePontosMonitoramento(fazendaId?: number | null) {
+  const [pontos, setPontos] = useState<SupabasePontoMonitoramento[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!isSupabaseConfigured() || fazendaId == null) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await getSupabase()
+          .from('pontos_monitoramento')
+          .select('id, nome, coordinates')
+          .eq('fazenda_id', fazendaId)
+          .order('id');
+        if (error) throw error;
+
+        const mapped: SupabasePontoMonitoramento[] = (data || [])
+          .filter((row: any) => row.coordinates?.coordinates?.length === 2)
+          .map((row: any) => ({
+            id: row.id,
+            nome: row.nome ?? `Ponto ${row.id}`,
+            lng: row.coordinates.coordinates[0],
+            lat: row.coordinates.coordinates[1],
+          }));
+
+        setPontos(mapped);
+      } catch (err: any) {
+        logger.error('Erro ao carregar pontos de monitoramento', { error: err.message });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    load();
+  }, [fazendaId, refetchTrigger]);
+
+  const refetch = useCallback(() => {
+    setRefetchTrigger((v) => v + 1);
+  }, []);
+
+  return { pontos, isLoading, refetch };
+}
+
 /**
  * Função para buscar pragas de um scout específico
  */

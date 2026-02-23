@@ -240,6 +240,7 @@ export default function InicioScreen() {
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 60 }]}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -432,7 +433,7 @@ export default function InicioScreen() {
             )}
           </View>
 
-          <View style={[styles.card, { backgroundColor: cardColor }]}>
+          <View style={[styles.card, styles.heatmapCard, { backgroundColor: cardColor }]}>
             <View style={styles.heatmapTitleRow}>
               <Text style={[styles.cardTitle, styles.heatmapCardTitleInline, { color: mutedColor }]}>MAPA DE PRAGAS</Text>
               <View style={[styles.heatmapSwitcher, { backgroundColor: heatmapSwitcherBg }]}>
@@ -645,12 +646,16 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  heatmapCard: {
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
   heatmapTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 6,
     width: '100%',
   },
   heatmapCardTitleInline: {
@@ -675,6 +680,7 @@ const styles = StyleSheet.create({
   },
   heatmapWrapper: {
     position: 'relative',
+    overflow: 'hidden',
   },
   mapFullscreenContainer: {
     flex: 1,

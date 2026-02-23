@@ -96,8 +96,24 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             }
           }
         }
-      } catch (e) {
-        logger.warn('Erro ao restaurar sessão no init', { error: e });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const isInvalidRefreshToken =
+          /refresh token not found|invalid refresh token/i.test(msg);
+        if (isInvalidRefreshToken) {
+          logger.warn('Refresh token inválido ou não encontrado, limpando sessão', { error: msg });
+          await storage.clearAuthCache().catch(() => {});
+          supabase.auth.signOut().catch(() => {});
+          set({
+            session: null,
+            user: null,
+            profile: null,
+            fazendaPadrao: null,
+            pendingFazendaChoice: false,
+          });
+        } else {
+          logger.warn('Erro ao restaurar sessão no init', { error: e });
+        }
       } finally {
         set({ isLoading: false });
       }

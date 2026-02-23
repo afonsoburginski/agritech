@@ -69,8 +69,13 @@ export const authService = {
   async getSession() {
     if (!supabase) return null;
 
-    const { data: { session } } = await supabase.auth.getSession();
-    return session;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session;
+    } catch (e) {
+      // Refresh token inválido/expirado: não propagar erro; caller trata como não logado
+      return null;
+    }
   },
 
   async getUser() {

@@ -101,8 +101,12 @@ function useWatermelon(): boolean {
 // ---------------------------------------------------------------------------
 
 async function updatePendingCountInStore(): Promise<void> {
-  const count = await getPendingRecognitionCount();
-  useAppStore.getState().setPendingRecognitionCount(count);
+  try {
+    const count = await getPendingRecognitionCount();
+    useAppStore.getState().setPendingRecognitionCount(count);
+  } catch (e) {
+    useAppStore.getState().setPendingRecognitionCount(0);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,17 +164,22 @@ export async function addToRecognitionQueue(
 }
 
 export async function getPendingRecognitionCount(): Promise<number> {
-  if (useWatermelon()) {
-    const db = getWatermelonDB()!;
-    const { Q } = await import('@nozbe/watermelondb');
-    const PendingRecognitionModel = (await import('@/database/watermelon/models/PendingRecognition')).default;
-    return await db
-      .get<typeof PendingRecognitionModel>(PendingRecognitionModel.table)
-      .query(Q.where('status', 'pending'))
-      .fetchCount();
+  try {
+    if (useWatermelon()) {
+      const db = getWatermelonDB();
+      if (!db) return (await asGetAll()).filter((i) => i.status === 'pending').length;
+      const { Q } = await import('@nozbe/watermelondb');
+      const PendingRecognitionModel = (await import('@/database/watermelon/models/PendingRecognition')).default;
+      return await db
+        .get<typeof PendingRecognitionModel>(PendingRecognitionModel.table)
+        .query(Q.where('status', 'pending'))
+        .fetchCount();
+    }
+    const items = await asGetAll();
+    return items.filter((i) => i.status === 'pending').length;
+  } catch {
+    return 0;
   }
-  const items = await asGetAll();
-  return items.filter((i) => i.status === 'pending').length;
 }
 
 export async function refreshPendingRecognitionCount(): Promise<void> {

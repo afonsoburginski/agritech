@@ -22,6 +22,8 @@ const MAP: Record<string, string> = {
   'already registered': 'Este e-mail já está cadastrado.',
   'Invalid email or password': 'E-mail ou senha incorretos.',
   'Token has expired': 'Sessão expirada. Faça login novamente.',
+  'Invalid Refresh Token': 'Sessão expirada. Faça login novamente.',
+  'Refresh Token Not Found': 'Sessão expirada. Faça login novamente.',
   // Permissões
   'Permission denied': 'Permissão negada. Ative nas configurações do app.',
   'Location permission denied': 'Permissão de localização negada. Ative nas configurações.',
