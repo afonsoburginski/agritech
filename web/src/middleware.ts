@@ -31,8 +31,11 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Allow API routes and static files
+  // Allow API routes, static files and páginas públicas
   if (pathname.startsWith('/api/') || pathname.startsWith('/_next/') || pathname.includes('.')) {
+    return supabaseResponse
+  }
+  if (pathname === '/privacidade') {
     return supabaseResponse
   }
 
