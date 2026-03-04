@@ -7,11 +7,6 @@ out/
 dist/
 *.tsbuildinfo
 
-# Env (não commitar segredos)
-.env
-.env.*
-.env*.local
-
 # OS
 .DS_Store
 
